@@ -1,0 +1,1 @@
+data/mock_images/*.bmp filter=lfs diff=lfs merge=lfs -text

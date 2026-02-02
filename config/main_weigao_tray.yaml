@@ -1,0 +1,71 @@
+imports:
+  - "camera.mock"
+  - "trigger.modbus"
+  - "output.hmi"
+  - "output.modbus"
+
+runtime:
+  save_dir: "data"
+  max_runtime_s: 0
+  history_size: 10
+  max_pending_triggers: 10
+  debounce_ms: 10.0
+  log_level: "info"
+
+camera:
+  type: "mock"
+  device_index: 0
+  grab_timeout_ms: 2000
+  max_retry_per_frame: 3
+  save_images: false
+  ext: ".bmp"
+  output_pixel_format: "bgr8"
+  width: 4056
+  height: 3040
+  ae_enable: false
+  awb_enable: false
+  exposure_us: 100000
+  analogue_gain: 1.0
+  frame_duration_us: 100000
+  settle_ms: 200
+  use_still: true
+
+comm:
+  http:
+    host: "0.0.0.0"
+    port: 8000
+  tcp:
+    host: "0.0.0.0"
+    port: 9000
+  modbus:
+    host: "0.0.0.0"
+    port: 1502
+    coil_offset: 800
+    di_offset: 800
+    ir_offset: 50
+    heartbeat_ms: 1000
+
+trigger:
+  global_min_interval_ms: 0
+  high_priority_cooldown_ms: 0
+  high_priority_sources: []
+  low_priority_sources: []
+  ip_whitelist: []
+  tcp:
+    enabled: false
+    word: "TRIG"
+  modbus:
+    enabled: true
+    poll_ms: 20
+
+detect:
+  impl: "weigao_tray"
+  config_file: "detect_weigao_tray.yaml"
+  timeout_ms: 2000
+  enable_preview: true
+  generate_overlay: true
+
+output:
+  enable_http: true
+  enable_modbus: true
+  write_csv: true
