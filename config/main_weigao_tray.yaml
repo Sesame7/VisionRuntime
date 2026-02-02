@@ -14,6 +14,7 @@ runtime:
 
 camera:
   type: "mock"
+  image_dir: "data/mock_images"
   device_index: 0
   grab_timeout_ms: 2000
   max_retry_per_frame: 3
