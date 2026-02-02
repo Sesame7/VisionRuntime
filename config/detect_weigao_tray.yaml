@@ -1,0 +1,83 @@
+denoise:
+  k: 3
+  sigma: 2.0
+grid:
+  rows: 3
+  cols_per_row:
+  - 17
+  - 17
+  - 17
+  anchor_left:
+  - - 154
+    - 66
+  - - 123
+    - 733
+  - - 104
+    - 1419
+  anchor_right:
+  - - 2740
+    - 66
+  - - 2766
+    - 733
+  - - 2791
+    - 1419
+  roi:
+    w: 150
+    h: 200
+yellow_hsv:
+  lower:
+  - 10
+  - 140
+  - 30
+  upper:
+  - 50
+  - 255
+  - 255
+morph:
+  open_k: 7
+  close_k: 7
+  erode_k: 3
+  erode_iter: 1
+  keep_largest: true
+rod:
+  vertical_tol_deg: 90.0
+  min_bbox_area: 50
+junction:
+  rod_bottom_percentile: 98.0
+  win_up: 60
+  win_down: 40
+  strip_offset_x: 24
+  strip_half_width: 12
+white:
+  S_max: 30
+  V_min: 100
+split:
+  smooth_half_win: 3
+  min_rows_above: 3
+  min_rows_below: 3
+  min_delta_white: 0.2
+band:
+  y0: 3
+  y1: 30
+  half_width: 30
+  H_low: 0
+  H_high: 179
+  smooth_half_win: 2
+  S_thr: 30
+  min_width: 10
+  max_width: 0
+offset:
+  offset_base: 4
+  offset_tol: 12
+height:
+  delta_up: 20
+overlay:
+  # Colors are BGR integers (OpenCV).
+  ok_bgr: [0, 200, 0]
+  ng_bgr: [0, 0, 220]
+  line_width: 5
+dbg:
+  show_roi: false
+  show_mask: false
+  show_strips: false
+  show_band: false

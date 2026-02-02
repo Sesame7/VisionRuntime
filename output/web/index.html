@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Camera Service</title>
+<style>
+body { margin:0; padding:0; font-family:Arial, sans-serif; background:#111; color:#eee; }
+:root { --ok:#6ccf85; --ng:#f05a5a; --err:#ffb020; --panel:#1d1d1d; --panel-strong:#222; --panel-border:#333; --muted:#888; }
+.header { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 8px; font-size:26px; font-weight:600; letter-spacing:0.5px; }
+.title-left { display:flex; align-items:center; gap:10px; }
+.logo { height:50px; width:auto; }
+.layout { display:flex; flex-direction:row; height:100vh; }
+.left { flex:1; display:flex; align-items:center; justify-content:center; padding:8px; }
+.left img { max-width:100%; max-height:100%; object-fit:contain; background:#000; }
+.right { width:430px; padding:8px; display:flex; flex-direction:column; gap:8px; }
+.panel { background:var(--panel); border:1px solid var(--panel-border); border-radius:8px; padding:8px; }
+.btn { display:inline-block; padding:10px 16px; min-width:110px; margin-right:6px; background:#2d7efc; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
+.btn-row { display:flex; gap:12px; align-items:center; justify-content:space-between; }
+.head-meta { display:flex; flex-direction:column; gap:6px; }
+.table-wrap { flex:1; overflow:auto; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { padding:6px 8px; text-align:left; border-bottom:1px solid #333; }
+th { position:sticky; top:0; background:var(--panel-strong); }
+.ok { color:var(--ok); }
+.ng { color:var(--ng); }
+.err { color:var(--err); }
+.stats { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+.stat { padding:8px; background:var(--panel-strong); border-radius:6px; text-align:center; }
+.stat .label { font-size:11px; color:var(--muted); }
+.stat .value { font-size:16px; font-weight:600; margin-top:4px; }
+.online { display:flex; align-items:center; gap:10px; padding:10px; background:var(--panel-strong); border-radius:6px; font-size:14px; }
+.online .dot { width:12px; height:12px; border-radius:50%; background:#555; }
+.online.ok .dot { background:var(--ok); box-shadow:0 0 6px rgba(108,207,133,0.6); }
+.online.ng .dot { background:var(--ng); box-shadow:0 0 6px rgba(240,90,90,0.6); }
+.title-time { margin-left:0; color:#eee; }
+.status-time { font-size:16px; margin-left:10px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="left">
+    <img id="img" src="/preview/latest" alt="latest image"/>
+  </div>
+  <div class="right">
+    <div class="panel">
+      <div class="header" id="titleHeader">
+        <div class="title-left">
+          <svg class="logo" viewBox="53 27 194 247" role="img" aria-label="Toplink Vision logo" fill="currentColor">
+            <path d="M 138.050 266.400 L 137.700 248.039 L 110.500 247.923 L 109.077 246.500 L 109.050 186.500 L 115.500 162.977 L 130.600 167.950 L 145.500 169.923 L 146.886 168.700 L 147.023 146.400 L 123.500 140.923 L 105.218 128.700 L 91.077 107.500 L 87.500 84.950 L 63.050 85.500 L 65.077 106.500 L 69.077 118.500 L 76.050 130.500 L 66.077 152.400 L 60.050 178.500 L 59.050 265.400 L 63.500 267.923 L 136.500 267.950 L 138.050 266.400 Z" />
+            <path d="M 161.950 266.400 L 162.300 248.039 L 189.500 247.923 L 190.923 246.500 L 190.950 186.500 L 184.500 162.977 L 169.400 167.950 L 154.500 169.923 L 153.114 168.700 L 152.977 146.400 L 176.500 140.923 L 194.782 128.700 L 208.923 107.500 L 212.500 84.950 L 236.950 85.500 L 234.923 106.500 L 230.923 118.500 L 223.950 130.500 L 233.923 152.400 L 239.950 178.500 L 240.950 265.400 L 236.500 267.923 L 163.500 267.950 L 161.950 266.400 Z" />
+            <path d="M 198.000 81.500 A 48.500 48.500 0 1 0 101.000 81.500 A 48.500 48.500 0 1 0 198.000 81.500 Z M 186.000 81.500 A 36.500 36.500 0 1 0 113.000 81.500 A 36.500 36.500 0 1 0 186.000 81.500 Z M 179.000 81.500 A 29.500 29.500 0 1 0 120.000 81.500 A 29.500 29.500 0 1 0 179.000 81.500 Z M 146.697 67.449 A 5.310 5.310 0 1 0 136.077 67.449 A 5.310 5.310 0 1 0 146.697 67.449 Z M 189.378 62.905 A 44.000 44.000 0 0 1 190.846 96.549 L 188.027 95.523 A 41.000 41.000 0 0 0 186.659 64.173 Z" fill-rule="evenodd" />
+          </svg>
+          Toplink Vision
+        </div>
+        <span class="title-time" id="clockTime">--</span>
+      </div>
+      <div class="head-meta">
+        <div class="btn-row">
+          <div id="statusTime" class="status-time">--</div>
+          <button class="btn" onclick="doTrigger()">Trigger</button>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="stats">
+        <div class="stat"><div class="label">Total</div><div class="value" id="statTotal">0</div></div>
+        <div class="stat"><div class="label">OK</div><div class="value ok" id="statOk">0</div></div>
+        <div class="stat"><div class="label">NG</div><div class="value ng" id="statNg">0</div></div>
+        <div class="stat"><div class="label">Error</div><div class="value err" id="statErr">0</div></div>
+        <div class="stat"><div class="label">Pass%</div><div class="value" id="statPass">0%</div></div>
+      </div>
+    </div>
+    <div class="panel table-wrap">
+      <table id="records">
+        <thead><tr><th>ID</th><th>Result</th><th>Date</th><th>Time</th><th>ms</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="online" id="onlineBox">
+        <span class="dot"></span>
+        <span id="onlineText">Runtime: Offline</span>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const REFRESH_MS = 1000;
+const HEARTBEAT_TIMEOUT_MS = 2000;
+const ID_PAD_LEN = 5;
+
+const els = {
+  img: document.getElementById('img'),
+  titleHeader: document.getElementById('titleHeader'),
+  clockTime: document.getElementById('clockTime'),
+  statusTime: document.getElementById('statusTime'),
+  onlineBox: document.getElementById('onlineBox'),
+  onlineText: document.getElementById('onlineText'),
+  statTotal: document.getElementById('statTotal'),
+  statOk: document.getElementById('statOk'),
+  statNg: document.getElementById('statNg'),
+  statErr: document.getElementById('statErr'),
+  statPass: document.getElementById('statPass'),
+  tbody: document.querySelector('#records tbody'),
+};
+
+async function doTrigger(){ await fetch('/trigger',{method:'POST'}); }
+let lastImgId = null;
+const baseStats = {total:0,ok:0,ng:0,error:0,pass_rate:0};
+function resultClass(result){
+  const r = String(result || '').toUpperCase();
+  return (r === 'OK') ? 'ok' : ((r === 'NG') ? 'ng' : 'err');
+}
+function renderStats(stats){
+  const s = stats || baseStats;
+  els.statTotal.innerText = s.total;
+  els.statOk.innerText = s.ok;
+  els.statNg.innerText = s.ng;
+  els.statErr.innerText = s.error || 0;
+  els.statPass.innerText = (s.pass_rate * 100).toFixed(1);
+}
+function renderRecords(records, maxRecords){
+  const showRecs = records.slice(0, maxRecords);
+  els.tbody.innerHTML = '';
+  showRecs.forEach(rec=>{
+    const id = rec.trigger_seq || 0;
+    const duration = typeof rec.duration_ms==='number' ? rec.duration_ms : 0;
+    const cls = resultClass(rec.result);
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td>${String(id).padStart(ID_PAD_LEN,'0')}</td>
+                    <td class="${cls}">${rec.result}</td>
+                    <td>${rec.triggered_at?.slice(0,10) || ''}</td>
+                    <td>${rec.triggered_at?.slice(11,23) || ''}</td>
+                    <td>${duration.toFixed(1)}</td>`;
+    els.tbody.appendChild(tr);
+  });
+  return showRecs;
+}
+function renderOnline(lastTickTs){
+  const now = Date.now();
+  const ok = typeof lastTickTs === 'number' && (now - lastTickTs * 1000) <= HEARTBEAT_TIMEOUT_MS;
+  els.onlineBox.className = 'online ' + (ok ? 'ok' : 'ng');
+  els.onlineText.innerText = ok ? 'Runtime: Online' : 'Runtime: Offline';
+}
+function tickClock(){
+  els.clockTime.innerText = new Date().toLocaleTimeString();
+}
+
+async function refresh(){
+  try{
+    const r=await fetch('/status'); const d=await r.json();
+    tickClock();
+    els.statusTime.innerText = 'Idle';
+    els.statusTime.className = 'status-time';
+    const recs = d.records || [];
+    const maxRecords = d.max_records || recs.length;
+    renderStats(d.stats);
+    const showRecs = renderRecords(recs, maxRecords);
+    if (showRecs.length){
+        const r0 = showRecs[0];
+        const id0 = r0.trigger_seq || 0;
+        const date0 = r0.triggered_at?.slice(0,10) || '';
+        const time0 = r0.triggered_at?.slice(11,23) || '';
+        const cls0 = resultClass(r0.result);
+        els.statusTime.className = `status-time ${cls0}`;
+        els.statusTime.innerText = `${String(id0).padStart(ID_PAD_LEN,'_')} ${date0} ${time0}`;
+        els.titleHeader.className = `header ${cls0}`;
+        if (id0 !== lastImgId){
+          lastImgId = id0;
+          els.img.src='/preview/latest?ts='+Date.now();
+        }
+      }
+    renderOnline(d.last_tick_ts);
+  }catch(e){
+    console.error(e);
+    els.statusTime.innerText = 'Status unreachable';
+    els.statusTime.className = 'status-time';
+    renderOnline(null);
+  }
+}
+setInterval(tickClock, REFRESH_MS);
+setInterval(refresh, REFRESH_MS);
+tickClock();
+refresh();
+</script>
+</body>
+</html>
