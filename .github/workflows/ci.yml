@@ -13,7 +13,7 @@ jobs:
     name: Ruff (required)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Ruff check
         uses: astral-sh/ruff-action@v3
@@ -33,7 +33,7 @@ jobs:
       contents: read
       actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
