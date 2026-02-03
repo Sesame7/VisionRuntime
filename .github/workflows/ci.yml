@@ -7,18 +7,46 @@ on:
 
 jobs:
   ruff:
+    name: Ruff (required)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # 1) Lint：检查规则（会让 CI 失败）
       - name: Ruff check
         uses: astral-sh/ruff-action@v3
         with:
           args: check .
 
-      # 2) Format：检查格式是否符合（会让 CI 失败）
       - name: Ruff format (check)
         uses: astral-sh/ruff-action@v3
         with:
           args: format --check .
+
+  deps_smoke_optional:
+    name: Deps + compile smoke (optional)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install deps (latest)
+        run: |
+          python -m pip install -U pip
+          python -m pip install -U -r requirements.txt
+
+      - name: Compile (syntax sanity)
+        run: python -m compileall -q .
+
+      - name: Freeze deps (for debugging)
+        run: python -m pip freeze | tee pip-freeze.txt
+
+      - name: Upload freeze
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-freeze
+          path: pip-freeze.txt
