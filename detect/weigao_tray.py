@@ -54,6 +54,42 @@ def _longest_true_run(b: np.ndarray) -> Optional[Tuple[int, int]]:
 	return int(starts[i]), int(ends[i])
 
 
+def _rect_from_inclusive(x0: int, y0: int, x1: int, y1: int) -> Tuple[int, int, int, int]:
+	x0 = int(x0)
+	y0 = int(y0)
+	x1 = int(x1)
+	y1 = int(y1)
+	return (
+		x0,
+		y0,
+		max(1, x1 - x0 + 1),
+		max(1, y1 - y0 + 1),
+	)
+
+
+def _clamp_span_inclusive(lo: Any, hi: Any, vmin: int, vmax: int) -> Tuple[int, int]:
+	lo_i = _clamp_int(lo, vmin, vmax)
+	hi_i = _clamp_int(hi, vmin, vmax)
+	if hi_i <= lo_i:
+		hi_i = min(vmax, lo_i + 1)
+	return lo_i, hi_i
+
+
+def _clamp_span_exclusive(lo: Any, hi: Any, vmin: int, vmax_excl: int) -> Tuple[int, int]:
+	lo_i = _clamp_int(lo, vmin, max(vmin, vmax_excl - 1))
+	hi_i = _clamp_int(hi, vmin, vmax_excl)
+	if hi_i <= lo_i:
+		hi_i = min(vmax_excl, lo_i + 1)
+	return lo_i, hi_i
+
+
+def _row_mean(mask_u8: np.ndarray, n_rows: int) -> np.ndarray:
+	if mask_u8.size == 0:
+		return np.zeros(n_rows, dtype=np.float32)
+	sums = cv2.reduce(mask_u8, 1, cv2.REDUCE_SUM, dtype=cv2.CV_32S)
+	return (sums[:, 0] / (255.0 * float(mask_u8.shape[1]))).astype(np.float32, copy=False)
+
+
 @dataclass
 class _SlotD:
 	row: int
@@ -61,6 +97,7 @@ class _SlotD:
 	roi: Tuple[int, int, int, int]  # x,y,w,h
 	x_center: float  # full-image x (float)
 	y_junction: int  # full-image y
+	hsv: np.ndarray  # ROI HSV image
 
 
 def _as_bgr_triplet(value: Any, default: Tuple[int, int, int]) -> Tuple[int, int, int]:
@@ -82,6 +119,16 @@ class WeigaoTrayDetector:
 	- Overlay uses denoised image as the base.
 	- Cumulative drawing: green marks keep even if later stages fail.
 	"""
+
+	_FAIL_STAGE = {
+		"ROD_NOT_FOUND": 0,
+		"ROD_ANGLE_NG": 1,
+		"ROD_BBOX_AREA_NG": 2,
+		"JUNCTION_NOT_FOUND": 3,
+		"HEIGHT_NG": 4,
+		"BAND_NOT_FOUND": 5,
+		"OFFSET_NG": 6,
+	}
 
 	def __init__(self, params: dict, generate_overlay: bool = True, input_pixel_format: str | None = None):
 		self.params = params or {}
@@ -142,16 +189,18 @@ class WeigaoTrayDetector:
 		white = p.get("white") or {}
 		self.white_s_max = int(white.get("S_max", 50))
 		self.white_v_min = int(white.get("V_min", 50))
+		self._white_lower = np.array([0, 0, 0], dtype=np.uint8)
+		self._white_upper = np.array([179, 255, 255], dtype=np.uint8)
 
 		split = p.get("split") or {}
 		self.split_smooth_half_win = int(split.get("smooth_half_win", 3))
 		self.min_rows_above = int(split.get("min_rows_above", 2))
 		self.min_rows_below = int(split.get("min_rows_below", 2))
 		self.min_delta_white = float(split.get("min_delta_white", 0.5))
-		self.split_kernel = None
+		self.split_kernel_size = 0
 		if self.split_smooth_half_win > 0:
 			k = 2 * self.split_smooth_half_win + 1
-			self.split_kernel = (np.ones(k, dtype=np.float32) / float(k)).astype(np.float32, copy=False)
+			self.split_kernel_size = int(k)
 
 		height = p.get("height") or {}
 		self.height_delta_up = int(height.get("delta_up", 12))
@@ -166,10 +215,11 @@ class WeigaoTrayDetector:
 		self.band_s_thr = int(band.get("S_thr", 30))
 		self.band_min_width = int(band.get("min_width", 10))
 		self.band_max_width = int(band.get("max_width", 0))
-		self.band_kernel = None
+		self.band_use_median = bool(band.get("use_median", True))
+		self.band_kernel_size = 0
 		if self.band_smooth_half_win > 0:
 			k = 2 * self.band_smooth_half_win + 1
-			self.band_kernel = (np.ones(k, dtype=np.float32) / float(k)).astype(np.float32, copy=False)
+			self.band_kernel_size = int(k)
 
 		offset = p.get("offset") or {}
 		self.offset_base = float(offset.get("offset_base", 3))
@@ -181,6 +231,10 @@ class WeigaoTrayDetector:
 		self.line_width = max(1, int(overlay.get("line_width", 2)))
 
 		self._validate()
+
+	def _update_white_bounds(self) -> None:
+		self._white_lower[2] = int(max(0, min(255, self.white_v_min)))
+		self._white_upper[1] = int(max(0, min(255, self.white_s_max)))
 
 	def _validate(self) -> None:
 		if self.rows != 3:
@@ -201,26 +255,27 @@ class WeigaoTrayDetector:
 			raise ValueError("split.min_delta_white must be >= 0")
 		if self.band_min_width < 0 or self.band_max_width < 0:
 			raise ValueError("band.min_width/max_width must be >= 0")
-
-	@staticmethod
-	def _find_contours_external_u8(img_u8: np.ndarray):
-		res = cv2.findContours(img_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-		return res[0] if len(res) == 2 else res[1]
+		self._update_white_bounds()
 
 	def _keep_largest_component_inplace(self, mask_u8: np.ndarray) -> None:
 		if self._tmp_u8 is None or self._keep_mask is None or self._tmp_u8.shape != mask_u8.shape:
 			self._tmp_u8 = np.empty_like(mask_u8)
 			self._keep_mask = np.empty_like(mask_u8)
 		np.copyto(self._tmp_u8, mask_u8)
-		contours = self._find_contours_external_u8(self._tmp_u8)
-		if not contours:
+		num, labels, stats, _ = cv2.connectedComponentsWithStats(self._tmp_u8, connectivity=8)
+		if num <= 1:
 			mask_u8.fill(0)
 			return
-		if len(contours) == 1:
+		if num == 2:
 			return
-		largest = max(contours, key=cv2.contourArea)
+		# Skip label 0 (background)
+		areas = stats[1:, cv2.CC_STAT_AREA]
+		if areas.size == 0:
+			mask_u8.fill(0)
+			return
+		largest_label = int(1 + int(np.argmax(areas)))
 		self._keep_mask.fill(0)
-		cv2.drawContours(self._keep_mask, [largest], -1, 255, thickness=-1)
+		self._keep_mask[labels == largest_label] = 255
 		cv2.bitwise_and(mask_u8, self._keep_mask, dst=mask_u8)
 
 	def _generate_rois(self, img_w: int, img_h: int) -> List[Tuple[int, int, int, int, int, int]]:
@@ -270,66 +325,64 @@ class WeigaoTrayDetector:
 			self._cached_rois = self._generate_rois(img_w, img_h)
 			self._cached_shape = (img_w, img_h)
 
-		# Denoise (base for overlay) and HSV once per image.
+		# Denoise (base for overlay). HSV is computed per ROI for speed on low-power devices.
 		img_dn = cv2.GaussianBlur(img, (self.denoise_k, self.denoise_k), self.denoise_sigma)
-		hsv = cv2.cvtColor(img_dn, cv2.COLOR_BGR2HSV)
-		yellow_full = cv2.inRange(hsv, self.yellow_lower, self.yellow_upper)
-		white_full = (hsv[:, :, 1] < self.white_s_max) & (hsv[:, :, 2] > self.white_v_min)
 
 		overlay_img = img_dn.copy() if self.generate_overlay else None
 
-		_fail_stage = {
-			"ROD_NOT_FOUND": 0,
-			"ROD_ANGLE_NG": 1,
-			"ROD_BBOX_AREA_NG": 2,
-			"JUNCTION_NOT_FOUND": 3,
-			"HEIGHT_NG": 4,
-			"BAND_NOT_FOUND": 5,
-			"OFFSET_NG": 6,
-		}
 		first_fail: Optional[Tuple[str, int, int]] = None  # (code, row, col)
 		first_fail_key: Optional[Tuple[int, int, int]] = None  # (row, col, stage)
 
 		def consider_fail(code: str, rr: int, cc: int):
 			nonlocal first_fail, first_fail_key
-			key = (int(rr), int(cc), int(_fail_stage.get(code, 99)))
+			key = (int(rr), int(cc), int(self._FAIL_STAGE.get(code, 99)))
 			if first_fail_key is None or key < first_fail_key:
 				first_fail_key = key
 				first_fail = (str(code), int(rr), int(cc))
+
+		def fail_with_rects(code: str, rr: int, cc: int, rects: List[Tuple[int, int, int, int]]):
+			if overlay_img is not None:
+				for rect in rects:
+					self._draw_rect(overlay_img, rect, self.ng_bgr)
+			consider_fail(code, rr, cc)
+
+		def fail_with_point(code: str, rr: int, cc: int, cx: int, cy: int):
+			if overlay_img is not None:
+				self._draw_center(overlay_img, int(cx), int(cy), self.ng_bgr)
+			consider_fail(code, rr, cc)
+
+		def fail_with_line(code: str, rr: int, cc: int, x: int, w: int, y: int):
+			if overlay_img is not None:
+				self._draw_junction_line(overlay_img, int(x), int(w), int(y), self.ng_bgr)
+			consider_fail(code, rr, cc)
 
 		# Collect stage-D success slots for stage E.
 		slots_d_ok: List[_SlotD] = []
 		junction_by_row: List[List[int]] = [[], [], []]
 
 		for r, c, x, y, w, h in self._cached_rois:
-			roi_mask = yellow_full[y : y + h, x : x + w]
-			core = roi_mask.copy()
+			roi_bgr = img_dn[y : y + h, x : x + w]
+			roi_hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
+			core = cv2.inRange(roi_hsv, self.yellow_lower, self.yellow_upper)
 
 			if self.ker_open is not None:
-				core = cv2.morphologyEx(core, cv2.MORPH_OPEN, self.ker_open)
+				cv2.morphologyEx(core, cv2.MORPH_OPEN, self.ker_open, dst=core)
 			if self.ker_close is not None:
-				core = cv2.morphologyEx(core, cv2.MORPH_CLOSE, self.ker_close)
+				cv2.morphologyEx(core, cv2.MORPH_CLOSE, self.ker_close, dst=core)
 			if self.ker_erode is not None and self.erode_iter > 0:
-				core = cv2.erode(core, self.ker_erode, iterations=self.erode_iter)
+				cv2.erode(core, self.ker_erode, iterations=self.erode_iter, dst=core)
 
 			if self.keep_largest:
 				self._keep_largest_component_inplace(core)
 
-			if cv2.countNonZero(core) == 0:
-				if overlay_img is not None:
-					self._draw_rect(overlay_img, (x, y, w, h), self.ng_bgr)
-				consider_fail("ROD_NOT_FOUND", int(r), int(c))
-				continue
-
 			M = cv2.moments(core, binaryImage=True)
-			if float(M.get("m00", 0.0)) <= 0:
-				if overlay_img is not None:
-					self._draw_rect(overlay_img, (x, y, w, h), self.ng_bgr)
-				consider_fail("ROD_NOT_FOUND", int(r), int(c))
+			m00 = float(M.get("m00", 0.0))
+			if m00 <= 0.0:
+				fail_with_rects("ROD_NOT_FOUND", r, c, [(x, y, w, h)])
 				continue
 
-			cx = float(M["m10"] / M["m00"])
-			cy = float(M["m01"] / M["m00"])
+			cx = float(M["m10"] / m00)
+			cy = float(M["m01"] / m00)
 			Cx = int(round(x + cx))
 			Cy = int(round(y + cy))
 
@@ -338,57 +391,54 @@ class WeigaoTrayDetector:
 			if overlay_img is not None:
 				self._draw_center(overlay_img, Cx, Cy, self.ok_bgr if angle_ok else self.ng_bgr)
 			if not angle_ok:
-				consider_fail("ROD_ANGLE_NG", int(r), int(c))
+				fail_with_point("ROD_ANGLE_NG", r, c, Cx, Cy)
 				continue
 
 			bx, by, bw, bh = cv2.boundingRect(core)
 			if int(bw * bh) < self.min_bbox_area:
-				if overlay_img is not None:
-					self._draw_rect(overlay_img, (x + int(bx), y + int(by), int(bw), int(bh)), self.ng_bgr)
-				consider_fail("ROD_BBOX_AREA_NG", int(r), int(c))
+				fail_with_rects(
+					"ROD_BBOX_AREA_NG",
+					r,
+					c,
+					[(x + int(bx), y + int(by), int(bw), int(bh))],
+				)
 				continue
 
-			row_cnt = np.count_nonzero(core, axis=1).astype(np.int32, copy=False)
+			row_sum = cv2.reduce(core, 1, cv2.REDUCE_SUM, dtype=cv2.CV_32S)
+			row_cnt = (row_sum[:, 0] // 255).astype(np.int32, copy=False)
 			total = int(row_cnt.sum())
 			if total <= 0:
-				if overlay_img is not None:
-					self._draw_rect(overlay_img, (x, y, w, h), self.ng_bgr)
-				consider_fail("ROD_NOT_FOUND", int(r), int(c))
+				fail_with_rects("ROD_NOT_FOUND", r, c, [(x, y, w, h)])
 				continue
 			cum = np.cumsum(row_cnt, dtype=np.int64)
 			pct = max(0.0, min(100.0, float(self.rod_bottom_percentile))) / 100.0
 			rank = int(math.floor(pct * (total - 1))) if total > 1 else 0
 			y_rod_bottom = int(np.searchsorted(cum, rank + 1, side="left"))
 
-			y0 = _clamp_int(y_rod_bottom - self.win_up, 0, h - 1)
-			y1 = _clamp_int(y_rod_bottom + self.win_down, 0, h - 1)
-			if y1 <= y0:
-				y1 = min(h - 1, y0 + 1)
+			y0, y1 = _clamp_span_inclusive(y_rod_bottom - self.win_up, y_rod_bottom + self.win_down, 0, h - 1)
 
 			cx_i = _clamp_int(cx, 0, w - 1)
 			d = int(self.strip_offset_x)
 			ws = int(self.strip_half_width)
 
-			lx0 = _clamp_int(cx_i - d - ws, 0, w - 1)
-			lx1 = _clamp_int(cx_i - d + ws, 0, w)
-			if lx1 <= lx0:
-				lx1 = min(w, lx0 + 1)
-			rx0 = _clamp_int(cx_i + d - ws, 0, w - 1)
-			rx1 = _clamp_int(cx_i + d + ws, 0, w)
-			if rx1 <= rx0:
-				rx1 = min(w, rx0 + 1)
+			lx0, lx1 = _clamp_span_exclusive(cx_i - d - ws, cx_i - d + ws, 0, w)
+			rx0, rx1 = _clamp_span_exclusive(cx_i + d - ws, cx_i + d + ws, 0, w)
 
-			white_roi = white_full[y : y + h, x : x + w]
-			win = white_roi[y0 : y1 + 1, :]
+			win_hsv = roi_hsv[y0 : y1 + 1, :]
+			win = cv2.inRange(win_hsv, self._white_lower, self._white_upper)
 			n_rows = int(y1 - y0 + 1)
 			l_strip = win[:, lx0:lx1]
 			r_strip = win[:, rx0:rx1]
-			l_mean = l_strip.mean(axis=1, dtype=np.float32) if l_strip.size else np.zeros(n_rows, dtype=np.float32)
-			r_mean = r_strip.mean(axis=1, dtype=np.float32) if r_strip.size else np.zeros(n_rows, dtype=np.float32)
+			l_mean = _row_mean(l_strip, n_rows)
+			r_mean = _row_mean(r_strip, n_rows)
 			score = (0.5 * (l_mean + r_mean)).astype(np.float32, copy=False)
 
-			if self.split_kernel is not None and score.size > 1:
-				score_s = np.convolve(score, self.split_kernel, mode="same").astype(np.float32, copy=False)
+			if self.split_kernel_size > 0 and score.size > 1:
+				score_s = cv2.blur(
+					score.reshape(-1, 1),
+					(1, self.split_kernel_size),
+					borderType=cv2.BORDER_REPLICATE,
+				).reshape(-1).astype(np.float32, copy=False)
 			else:
 				score_s = score
 
@@ -396,10 +446,15 @@ class WeigaoTrayDetector:
 			k0 = max(1, int(self.min_rows_above))
 			k1 = n - max(1, int(self.min_rows_below))
 			if n < 2 or k0 > k1:
-				if overlay_img is not None:
-					self._draw_rect(overlay_img, (x + lx0, y + y0, max(1, lx1 - lx0), max(1, y1 - y0 + 1)), self.ng_bgr)
-					self._draw_rect(overlay_img, (x + rx0, y + y0, max(1, rx1 - rx0), max(1, y1 - y0 + 1)), self.ng_bgr)
-				consider_fail("JUNCTION_NOT_FOUND", int(r), int(c))
+				fail_with_rects(
+					"JUNCTION_NOT_FOUND",
+					r,
+					c,
+					[
+						_rect_from_inclusive(x + lx0, y + y0, x + lx1 - 1, y + y1),
+						_rect_from_inclusive(x + rx0, y + y0, x + rx1 - 1, y + y1),
+					],
+				)
 				continue
 
 			ps = np.empty(n + 1, dtype=np.float32)
@@ -415,21 +470,34 @@ class WeigaoTrayDetector:
 			best_k = int(ks[idx])
 			best_contrast = float(contrast[idx])
 			if best_contrast < float(self.min_delta_white):
-				if overlay_img is not None:
-					self._draw_rect(overlay_img, (x + lx0, y + y0, max(1, lx1 - lx0), max(1, y1 - y0 + 1)), self.ng_bgr)
-					self._draw_rect(overlay_img, (x + rx0, y + y0, max(1, rx1 - rx0), max(1, y1 - y0 + 1)), self.ng_bgr)
-				consider_fail("JUNCTION_NOT_FOUND", int(r), int(c))
+				fail_with_rects(
+					"JUNCTION_NOT_FOUND",
+					r,
+					c,
+					[
+						_rect_from_inclusive(x + lx0, y + y0, x + lx1 - 1, y + y1),
+						_rect_from_inclusive(x + rx0, y + y0, x + rx1 - 1, y + y1),
+					],
+				)
 				continue
 
 			y_junction = int(y + y0 + best_k)
-			slots_d_ok.append(_SlotD(row=int(r), col=int(c), roi=(int(x), int(y), int(w), int(h)), x_center=float(x + cx), y_junction=y_junction))
-			junction_by_row[int(r)].append(y_junction)
+			slots_d_ok.append(
+				_SlotD(
+					row=r,
+					col=c,
+					roi=(x, y, w, h),
+					x_center=float(x + cx),
+					y_junction=y_junction,
+					hsv=roi_hsv,
+				)
+			)
+			junction_by_row[r].append(y_junction)
 
 		# Stage E: row-wise height decision; draw junction line (green or red).
-		baseline_by_row: List[Optional[float]] = [None, None, None]
-		for r in range(3):
-			ys = junction_by_row[r]
-			baseline_by_row[r] = float(np.median(ys)) if ys else None
+		baseline_by_row: List[Optional[float]] = [
+			float(np.median(ys)) if ys else None for ys in junction_by_row
+		]
 
 		slots_height_ok: List[_SlotD] = []
 		for slot in slots_d_ok:
@@ -437,18 +505,16 @@ class WeigaoTrayDetector:
 			x, y, w, h = slot.roi
 			if base is None:
 				# No baseline: treat as junction-not-found.
-				if overlay_img is not None:
-					# Preserve center (already drawn) and mark D/E failure minimally by strips is not available here.
-					# Use a red ROI rectangle as the minimal fallback marker.
-					self._draw_rect(overlay_img, (x, y, w, h), self.ng_bgr)
-				consider_fail("JUNCTION_NOT_FOUND", int(slot.row), int(slot.col))
+				# Preserve center (already drawn) and mark D/E failure minimally by strips is not available here.
+				# Use a red ROI rectangle as the minimal fallback marker.
+				fail_with_rects("JUNCTION_NOT_FOUND", slot.row, slot.col, [(x, y, w, h)])
 				continue
 			threshold = float(base) - float(self.height_delta_up)
 			height_ok = float(slot.y_junction) >= threshold
 			if overlay_img is not None:
 				self._draw_junction_line(overlay_img, x, w, slot.y_junction, self.ok_bgr if height_ok else self.ng_bgr)
 			if not height_ok:
-				consider_fail("HEIGHT_NG", int(slot.row), int(slot.col))
+				fail_with_line("HEIGHT_NG", slot.row, slot.col, x, w, slot.y_junction)
 				continue
 			slots_height_ok.append(slot)
 
@@ -456,45 +522,62 @@ class WeigaoTrayDetector:
 		for slot in slots_height_ok:
 			x, y, w, h = slot.roi
 			cols = int(self.cols_per_row[slot.row])
+			x1_max = x + w - 1
+			y1_max = y + h - 1
 
-			y0f = _clamp_int(slot.y_junction + self.band_y0, y, y + h - 1)
-			y1f = _clamp_int(slot.y_junction + self.band_y1, y, y + h - 1)
-			if y1f <= y0f:
-				y1f = min(y + h - 1, y0f + 1)
-			xc = _clamp_int(slot.x_center, x, x + w - 1)
-			x0f = _clamp_int(xc - self.band_half_width, x, x + w - 1)
-			x1f = _clamp_int(xc + self.band_half_width, x, x + w - 1)
-			if x1f <= x0f:
-				x1f = min(x + w - 1, x0f + 1)
+			y0f, y1f = _clamp_span_inclusive(slot.y_junction + self.band_y0, slot.y_junction + self.band_y1, y, y1_max)
+			xc = _clamp_int(slot.x_center, x, x1_max)
+			x0f, x1f = _clamp_span_inclusive(xc - self.band_half_width, xc + self.band_half_width, x, x1_max)
 
 			if y1f <= y0f or x1f <= x0f:
-				if overlay_img is not None:
-					self._draw_rect(overlay_img, (x0f, y0f, max(1, x1f - x0f + 1), max(1, y1f - y0f + 1)), self.ng_bgr)
-				consider_fail("BAND_NOT_FOUND", int(slot.row), int(slot.col))
+				fail_with_rects(
+					"BAND_NOT_FOUND",
+					slot.row,
+					slot.col,
+					[_rect_from_inclusive(x0f, y0f, x1f, y1f)],
+				)
 				continue
 
-			roi_hsv = hsv[y0f : y1f + 1, x0f : x1f + 1]
+			lx0, lx1 = _clamp_span_inclusive(x0f - x, x1f - x, 0, w - 1)
+			ly0, ly1 = _clamp_span_inclusive(y0f - y, y1f - y, 0, h - 1)
+			roi_hsv = slot.hsv[ly0 : ly1 + 1, lx0 : lx1 + 1]
 			Hc = roi_hsv[:, :, 0]
 			Sc = roi_hsv[:, :, 1].astype(np.float32, copy=False)
 			m = _h_in_range(Hc, self.band_h_low, self.band_h_high)
-			s_masked = np.where(m, Sc, np.nan)
-			s_col = np.nanmedian(s_masked, axis=0).astype(np.float32, copy=False)
+			if self.band_use_median:
+				s_masked = np.where(m, Sc, np.nan)
+				s_col = np.nanmedian(s_masked, axis=0).astype(np.float32, copy=False)
+			else:
+				mf = m.astype(np.float32, copy=False)
+				s_sum = (Sc * mf).sum(axis=0, dtype=np.float32)
+				s_cnt = mf.sum(axis=0, dtype=np.float32)
+				s_col = (s_sum / np.maximum(s_cnt, 1.0)).astype(np.float32, copy=False)
 			s_col = np.nan_to_num(s_col, nan=0.0)
-			if self.band_kernel is not None and s_col.size > 1:
-				s_col = np.convolve(s_col, self.band_kernel, mode="same").astype(np.float32, copy=False)
+			if self.band_kernel_size > 0 and s_col.size > 1:
+				s_col = cv2.blur(
+					s_col.reshape(1, -1),
+					(self.band_kernel_size, 1),
+					borderType=cv2.BORDER_REPLICATE,
+				).reshape(-1).astype(np.float32, copy=False)
 			b = s_col >= float(self.band_s_thr)
 			run = _longest_true_run(b)
 			if run is None:
-				if overlay_img is not None:
-					self._draw_rect(overlay_img, (x0f, y0f, max(1, x1f - x0f + 1), max(1, y1f - y0f + 1)), self.ng_bgr)
-				consider_fail("BAND_NOT_FOUND", int(slot.row), int(slot.col))
+				fail_with_rects(
+					"BAND_NOT_FOUND",
+					slot.row,
+					slot.col,
+					[_rect_from_inclusive(x0f, y0f, x1f, y1f)],
+				)
 				continue
 			L, R = run
 			width = int(R - L + 1)
 			if width < int(self.band_min_width) or (int(self.band_max_width) > 0 and width > int(self.band_max_width)):
-				if overlay_img is not None:
-					self._draw_rect(overlay_img, (x0f, y0f, max(1, x1f - x0f + 1), max(1, y1f - y0f + 1)), self.ng_bgr)
-				consider_fail("BAND_NOT_FOUND", int(slot.row), int(slot.col))
+				fail_with_rects(
+					"BAND_NOT_FOUND",
+					slot.row,
+					slot.col,
+					[_rect_from_inclusive(x0f, y0f, x1f, y1f)],
+				)
 				continue
 
 			xL = int(x0f + L)
@@ -510,7 +593,7 @@ class WeigaoTrayDetector:
 			if overlay_img is not None:
 				self._draw_center(overlay_img, int(round(x_band)), int(y_mid), self.ok_bgr if offset_ok else self.ng_bgr)
 			if not offset_ok:
-				consider_fail("OFFSET_NG", int(slot.row), int(slot.col))
+				fail_with_point("OFFSET_NG", slot.row, slot.col, int(round(x_band)), int(y_mid))
 				continue
 
 		ok = first_fail is None

@@ -11,6 +11,7 @@ runtime:
   max_pending_triggers: 10
   debounce_ms: 10.0
   log_level: "info"
+  opencv_num_threads: 0
 
 camera:
   type: "mock"

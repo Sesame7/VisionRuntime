@@ -50,7 +50,10 @@ class RaspiCamera(BaseCamera):
 		ctrls = self._build_controls()
 		if not ctrls:
 			return
-		self._cam.set_controls(ctrls)
+		cam = self._cam
+		if cam is None:
+			return
+		cam.set_controls(ctrls)
 		settle_ms = max(int(self.cfg.settle_ms or 0), 0)
 		if settle_ms > 0:
 			time.sleep(settle_ms / 1000.0)
@@ -83,7 +86,7 @@ class RaspiCamera(BaseCamera):
 	@contextmanager
 	def session(self):
 		self._cam = Picamera2()
-		main_cfg = {"format": "XBGR8888"}
+		main_cfg: dict[str, object] = {"format": "XBGR8888"}
 		if self.cfg.width and self.cfg.height:
 			main_cfg["size"] = (int(self.cfg.width), int(self.cfg.height))
 		if self.cfg.use_still:

@@ -5,13 +5,19 @@
 import argparse
 import asyncio
 import logging
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from threading import Lock
 from typing import List, Tuple
 
-from pymodbus.constants import ExcCodes
-from pymodbus.datastore import ModbusDeviceContext, ModbusSequentialDataBlock, ModbusServerContext
-from pymodbus.server import ModbusTcpServer
+from core.pymodbus_compat import (
+	ModbusDeviceContext,
+	ModbusDeviceContextType,
+	ModbusSequentialDataBlock,
+	ModbusTcpServer,
+	build_server_context,
+	is_modbus_exception,
+)
 
 LOG = logging.getLogger("modbus.sim")
 
@@ -34,7 +40,7 @@ RESULT_CHOICES = ("OK", "NG", "TIMEOUT", "ERROR", "CAMERA_ERROR", "QUEUE_OVERFLO
 
 
 class SimState:
-	def __init__(self, device_ctx: ModbusDeviceContext, coil_addr: int, di_addr: int, ir_addr: int):
+	def __init__(self, device_ctx: ModbusDeviceContextType, coil_addr: int, di_addr: int, ir_addr: int):
 		self._lock = Lock()
 		self._ctx = device_ctx
 		self._coil_addr = int(coil_addr)
@@ -92,12 +98,15 @@ class SimState:
 			return self._last_cmd_trig, self._last_cmd_reset
 
 
-def _require_values(values: List[int] | List[bool] | ExcCodes, count: int, label: str) -> List[int]:
-	if isinstance(values, ExcCodes):
+def _require_values(values: List[int] | List[bool] | object, count: int, label: str) -> List[int]:
+	if is_modbus_exception(values):
 		raise RuntimeError(f"Sim read failed for {label}: {values!r}")
-	if len(values) < count:
-		return list(values) + [0] * (count - len(values))
-	return list(values)
+	if not isinstance(values, Iterable):
+		raise RuntimeError(f"Sim read failed for {label}: non-iterable {values!r}")
+	vals = list(values)
+	if len(vals) < count:
+		return vals + [0] * (count - len(vals))
+	return vals
 
 
 def _map_codes(result: str) -> Tuple[int, int]:
@@ -167,7 +176,7 @@ async def _run_server(args):
 	ir_block = ModbusSequentialDataBlock(ir_base, [0] * 10)
 	device_ctx = ModbusDeviceContext(di=di_block, co=coil_block, ir=ir_block, hr=None)
 	state = SimState(device_ctx, coil_addr, di_addr, ir_addr)
-	context = ModbusServerContext(devices=device_ctx, single=True)
+	context = build_server_context(device_ctx)
 	server = ModbusTcpServer(context, address=(args.host, args.port))
 
 	tasks = [

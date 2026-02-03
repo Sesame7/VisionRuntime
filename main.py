@@ -4,6 +4,8 @@ import argparse
 import logging
 import os
 
+import cv2
+
 from camera import CameraConfig, create_camera, ensure_dir
 from core.config import ConfigError, load_config
 from detect import create_detector
@@ -49,6 +51,8 @@ def main():
 	except ConfigError as e:
 		logging.error("Config load failed: %s", e)
 		raise SystemExit(1)
+	if int(getattr(cfg.runtime, "opencv_num_threads", 0)) > 0:
+		cv2.setNumThreads(int(cfg.runtime.opencv_num_threads))
 	# Config-driven log level (unless overridden by CLI).
 	if not args.verbose and not args.log_level:
 		setup_logging(args.verbose, getattr(cfg.runtime, "log_level", "info"))

@@ -1,6 +1,6 @@
 denoise:
-  k: 3
-  sigma: 2.0
+  k: 1
+  sigma: 0
 grid:
   rows: 3
   cols_per_row:
@@ -34,10 +34,10 @@ yellow_hsv:
   - 255
   - 255
 morph:
-  open_k: 7
-  close_k: 7
-  erode_k: 3
-  erode_iter: 1
+  open_k: 1
+  close_k: 1
+  erode_k: 1
+  erode_iter: 0
   keep_largest: true
 rod:
   vertical_tol_deg: 90.0
@@ -66,6 +66,7 @@ band:
   S_thr: 30
   min_width: 10
   max_width: 0
+  use_median: false
 offset:
   offset_base: 4
   offset_tol: 12
