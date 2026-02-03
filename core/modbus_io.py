@@ -3,21 +3,30 @@
 import asyncio
 import logging
 import threading
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Sequence
 
-from pymodbus.constants import ExcCodes
-from pymodbus.datastore import ModbusDeviceContext, ModbusSequentialDataBlock, ModbusServerContext
-from pymodbus.server import ModbusTcpServer
+from core.pymodbus_compat import (
+	ModbusDeviceContext,
+	ModbusSequentialDataBlock,
+	ModbusTcpServer,
+	ModbusTcpServerType,
+	build_server_context,
+	is_modbus_exception,
+)
 
 from core import runtime
 
 L = logging.getLogger("sci_cam.modbus.io")
 
 
-def _require_values(values: Sequence[int] | Sequence[bool] | ExcCodes, count: int, label: str) -> list[int]:
-	if isinstance(values, ExcCodes):
+def _require_values(values: Sequence[int] | Sequence[bool] | object, count: int, label: str) -> list[int]:
+	if is_modbus_exception(values):
 		L.warning("Modbus read failed for %s: %r", label, values)
+		return [0] * max(0, int(count))
+	if not isinstance(values, Iterable):
+		L.warning("Modbus read returned non-iterable for %s: %r", label, values)
 		return [0] * max(0, int(count))
 	vals = list(values)
 	if len(vals) < count:
@@ -44,7 +53,7 @@ class ModbusIO:
 		self.heartbeat_ms = max(int(heartbeat_ms), 100)
 		self._task_reg = task_reg
 		self._lock = threading.Lock()
-		self._server: ModbusTcpServer | None = None
+		self._server: ModbusTcpServerType | None = None
 		self._tasks: list[object] = []
 
 		# pymodbus server adds +1 internally; base must be offset + 1.
@@ -56,7 +65,7 @@ class ModbusIO:
 		self._di_block = ModbusSequentialDataBlock(di_base, [0] * 8)
 		self._ir_block = ModbusSequentialDataBlock(ir_base, [0] * 10)
 		self._device_ctx = ModbusDeviceContext(di=self._di_block, co=self._coil_block, ir=self._ir_block, hr=None)
-		self._context = ModbusServerContext(devices=self._device_ctx, single=True)
+		self._context = build_server_context(self._device_ctx)
 
 	def start(self):
 		if self._server:
@@ -147,7 +156,7 @@ class ModbusIO:
 
 	def _set_values_locked(self, func_code: int, address: int, values: Sequence[int], label: str):
 		res = self._device_ctx.setValues(func_code, address, list(values))
-		if isinstance(res, ExcCodes):
+		if is_modbus_exception(res):
 			L.warning("Modbus write failed for %s: %r", label, res)
 
 	def _toggle_di_locked(self, idx: int):

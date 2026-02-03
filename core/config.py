@@ -23,6 +23,7 @@ class RuntimeConfig:
 	max_pending_triggers: int = 50
 	debounce_ms: float = 10.0
 	log_level: str = "info"
+	opencv_num_threads: int = 0
 
 
 @dataclass
