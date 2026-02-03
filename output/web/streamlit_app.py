@@ -10,7 +10,9 @@ REQUEST_TIMEOUT_S = 0.8
 LOGO_PATH = "output/web/logo.svg"
 HEARTBEAT_TIMEOUT_S = 2.0
 
-st.set_page_config(page_title="Toplink Vision", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="Toplink Vision", layout="wide", initial_sidebar_state="collapsed"
+)
 
 st_autorefresh(interval=int(REFRESH_S * 1000), key="auto_refresh")
 
@@ -25,6 +27,7 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
 
 def fetch_status(base_url: str):
     try:
@@ -140,9 +143,7 @@ def build_table_html(records: list[dict]) -> str:
         "<th style='text-align:left;padding:4px 6px;border-bottom:1px solid #ddd;'>Time</th>"
         "<th style='text-align:left;padding:4px 6px;border-bottom:1px solid #ddd;'>ms</th>"
         "</tr></thead>"
-        "<tbody>"
-        + "".join(rows_html)
-        + "</tbody></table>"
+        "<tbody>" + "".join(rows_html) + "</tbody></table>"
     )
 
 
@@ -172,7 +173,10 @@ with right:
     # Header panel: logo + title on left, clock on right
     header_left, header_right = st.columns([3, 2], gap="small")
     with header_left:
-        logo_html = inline_logo.replace("<svg", f"<svg style='color:{title_color};height:40px;width:auto;vertical-align:middle;margin-right:8px;'")
+        logo_html = inline_logo.replace(
+            "<svg",
+            f"<svg style='color:{title_color};height:40px;width:auto;vertical-align:middle;margin-right:8px;'",
+        )
         st.markdown(
             f"<div style='display:flex;align-items:center;color:{title_color};font-size:1.6rem;font-weight:600;'>{logo_html}<span>Toplink Vision</span></div>",
             unsafe_allow_html=True,
@@ -213,11 +217,26 @@ with right:
         ng = stats.get("ng", 0)
         err = stats.get("error", 0)
         pass_rate = stats.get("pass_rate", 0.0) * 100
-        col1.markdown(f"**Total**<br><span style='font-size:22px;'>{total}</span>", unsafe_allow_html=True)
-        col2.markdown(f"**OK**<br><span style='color:#2ecc71;font-size:22px;'>{ok}</span>", unsafe_allow_html=True)
-        col3.markdown(f"**NG**<br><span style='color:#ff4d4d;font-size:22px;'>{ng}</span>", unsafe_allow_html=True)
-        col4.markdown(f"**Err**<br><span style='color:#ffb020;font-size:22px;'>{err}</span>", unsafe_allow_html=True)
-        col5.markdown(f"**Pass%**<br><span style='font-size:22px;'>{pass_rate:.1f}</span>", unsafe_allow_html=True)
+        col1.markdown(
+            f"**Total**<br><span style='font-size:22px;'>{total}</span>",
+            unsafe_allow_html=True,
+        )
+        col2.markdown(
+            f"**OK**<br><span style='color:#2ecc71;font-size:22px;'>{ok}</span>",
+            unsafe_allow_html=True,
+        )
+        col3.markdown(
+            f"**NG**<br><span style='color:#ff4d4d;font-size:22px;'>{ng}</span>",
+            unsafe_allow_html=True,
+        )
+        col4.markdown(
+            f"**Err**<br><span style='color:#ffb020;font-size:22px;'>{err}</span>",
+            unsafe_allow_html=True,
+        )
+        col5.markdown(
+            f"**Pass%**<br><span style='font-size:22px;'>{pass_rate:.1f}</span>",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("")
 
