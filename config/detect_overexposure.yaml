@@ -1,0 +1,4 @@
+# Minimal overexposure config used by tests and demos.
+overexp_threshold: 245
+overexp_ratio: 0.02
+downscale_factor: 1.0

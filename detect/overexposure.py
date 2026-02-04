@@ -1,12 +1,8 @@
-import logging
 from typing import Tuple
 
 import numpy as np
 
 from .base import register_detector
-
-L = logging.getLogger("sci_cam.detection.overexposure")
-
 
 def detect_overexposure(
     img: np.ndarray,
@@ -14,20 +10,14 @@ def detect_overexposure(
     ratio_threshold: float = 0.02,
     return_overlay: bool = True,
 ) -> Tuple[float, bool, np.ndarray | None]:
-    """
-    Detect overexposed regions.
-    Returns (overexp_ratio, is_ng, overlay_image or None).
-    Overlay draws half-transparent red on overexposed pixels; can be skipped for low-spec devices.
-    """
-    # Use integer luminance approximation to avoid temporary float arrays and lower peak memory.
     if img.ndim == 2:
         gray = img.astype(np.uint8, copy=False)
     else:
         img_u16 = img.astype(np.uint16, copy=False)
-        gray_u16 = (
+        gray = (
             img_u16[:, :, 0] * 77 + img_u16[:, :, 1] * 150 + img_u16[:, :, 2] * 29
         ) >> 8
-        gray = gray_u16.astype(np.uint8, copy=False)
+        gray = gray.astype(np.uint8, copy=False)
     mask = gray >= threshold
     ratio = float(mask.mean())
     is_ng = ratio > ratio_threshold
@@ -36,20 +26,13 @@ def detect_overexposure(
         return ratio, is_ng, None
 
     if img.ndim == 2:
-        overlay_base = np.repeat(gray[:, :, None], 3, axis=2)
+        overlay = np.repeat(gray[:, :, None], 3, axis=2)
     else:
-        overlay_base = img
-    if not mask.any():
-        return ratio, is_ng, overlay_base
-
-    overlay = overlay_base.copy()
-    over_idx = mask
-    # Blend with red (50%) using integer math to avoid temporary float arrays.
-    overlay[..., 2][over_idx] = (
-        overlay[..., 2][over_idx].astype(np.uint16) + 255
-    ) // 2  # R channel in BGR -> index 2
-    overlay[..., 1][over_idx] = overlay[..., 1][over_idx] // 2  # G
-    overlay[..., 0][over_idx] = overlay[..., 0][over_idx] // 2  # B
+        overlay = img.copy()
+    if mask.any():
+        overlay[..., 2][mask] = (overlay[..., 2][mask].astype(np.uint16) + 255) // 2
+        overlay[..., 1][mask] = overlay[..., 1][mask] // 2
+        overlay[..., 0][mask] = overlay[..., 0][mask] // 2
     return ratio, is_ng, overlay
 
 
@@ -65,7 +48,6 @@ class OverExposureDetector:
         self.ratio_threshold = float(params.get("overexp_ratio", 0.02))
         self.downscale_factor = float(params.get("downscale_factor", 1.0))
         self.generate_overlay = generate_overlay
-        self._validate()
 
     def detect(self, img: np.ndarray):
         target = img
@@ -82,14 +64,6 @@ class OverExposureDetector:
         message = f"{prefix}: overexp_ratio={ratio:.4f} thr={self.threshold} ratio_thr={self.ratio_threshold:.4f}"
         result_code = "DETECT_OVEREXPOSE" if is_ng else "OK"
         return (not is_ng), message, overlay, result_code
-
-    def _validate(self):
-        if not (0 <= self.threshold <= 255):
-            raise ValueError("detect overexp_threshold must be 0..255")
-        if not (0 < self.ratio_threshold <= 1.0):
-            raise ValueError("detect overexp_ratio must be in (0, 1]")
-        if not (0 < self.downscale_factor <= 1.0):
-            raise ValueError("detect downscale_factor must be in (0, 1]")
 
 
 __all__ = ["OverExposureDetector", "detect_overexposure"]
