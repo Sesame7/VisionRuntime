@@ -19,6 +19,7 @@
 - Main config template: `config/example_main_*.yaml` (e.g. `example_main_weigao_tray.yaml`), for copying only; it is never loaded.
 - Detection config (actual use): `config/detect_<PROJECT>_<SITE>.yaml`, explicitly specified by `detect.config_file` in the main config (relative to `config/`, absolute paths may also be supported; validate existence at startup).
 - Detection config examples: `config/detect_overexposure.yaml` (never auto-loaded; examples only).
+- Test main config lives in `config/tests/main_test.yaml` to avoid `main_*.yaml` collisions.
 
 ## 4. Loader Responsibilities and Flow
 

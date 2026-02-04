@@ -37,6 +37,7 @@ class TestMinimalFlow(unittest.TestCase):
 
         cfg = load_config(TEST_CONFIG_DIR)
         cfg.runtime.save_dir = TEST_IMAGE_DIR
+        cfg.runtime.debounce_ms = 0.0
         cfg.camera.image_dir = TEST_IMAGE_DIR
         camera_cfg = CameraConfig(
             save_dir=cfg.runtime.save_dir,
@@ -84,6 +85,7 @@ class TestMinimalFlow(unittest.TestCase):
         with camera.session():
             runtime.start()
             try:
+                time.sleep(0.05)
                 ok1 = runtime.app_context.trigger_gateway.report_raw_trigger("TEST")
                 ok2 = runtime.app_context.trigger_gateway.report_raw_trigger("TEST")
                 self.assertTrue(ok1 and ok2)

@@ -16,7 +16,7 @@ def detect_overexposure(
     else:
         img_u16 = img.astype(np.uint16, copy=False)
         gray = (
-            img_u16[:, :, 0] * 77 + img_u16[:, :, 1] * 150 + img_u16[:, :, 2] * 29
+            img_u16[:, :, 2] * 77 + img_u16[:, :, 1] * 150 + img_u16[:, :, 0] * 29
         ) >> 8
         gray = gray.astype(np.uint8, copy=False)
     mask = gray >= threshold
