@@ -1,1 +1,6 @@
+docs export-ignore
+tests export-ignore
+data/test export-ignore
+.github export-ignore
+*.md export-ignore
 data/mock_images/*.bmp filter=lfs diff=lfs merge=lfs -text
