@@ -133,6 +133,12 @@ camera:
 
 See `CONTRIBUTING.md` for how to report issues and submit PRs.
 
+## Tests
+
+- Minimal flow test config: `config/tests/main_test.yaml`
+- Test images: `data/test/ok.png`, `data/test/ng.png`
+- Run: `python -m unittest discover -s tests -v`
+
 ## License
 
 MIT License. See `LICENSE`.
