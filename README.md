@@ -13,14 +13,14 @@ Config-driven industrial vision service for production lines, with web HMI, Modb
 
 ```mermaid
 flowchart LR
-  Config[Config YAML\nconfig/main_*.yaml] --> Runtime
+  Config[Config YAML<br/>config/main_*.yaml] --> Runtime
 
   subgraph core[core]
-    Runtime[SystemRuntime\ncore/runtime.py]
-    Gateway[TriggerGateway\ntrigger/gateway.py]
-    CamWorker[CameraWorker\ncore/worker.py]
-    DetWorker[DetectWorker\ncore/worker.py]
-    OutMgr[OutputManager\noutput/manager.py]
+    Runtime[SystemRuntime<br/>core/runtime.py]
+    Gateway[TriggerGateway<br/>trigger/gateway.py]
+    CamWorker[CameraWorker<br/>core/worker.py]
+    DetWorker[DetectWorker<br/>core/worker.py]
+    OutMgr[OutputManager<br/>output/manager.py]
   end
 
   subgraph trigger[trigger]
@@ -30,11 +30,11 @@ flowchart LR
   end
 
   subgraph camera[camera]
-    Drivers[Drivers\nmock/raspi/hik/...]
+    Drivers[Drivers<br/>mock/raspi/hik/...]
   end
 
   subgraph detect[detect]
-    Detector[Detector Impl\npluggable]
+    Detector[Detector Impl<br/>pluggable]
   end
 
   subgraph output[output]
