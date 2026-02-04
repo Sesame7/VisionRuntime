@@ -1,0 +1,5 @@
+docs export-ignore
+tests export-ignore
+data/test export-ignore
+.github export-ignore
+*.md export-ignore
