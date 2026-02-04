@@ -1,0 +1,22 @@
+runtime:
+  save_dir: "data/test"
+  history_size: 5
+  debounce_ms: 0
+
+camera:
+  type: "mock"
+  save_images: false
+  output_pixel_format: "bgr8"
+  image_dir: "data/test"
+  order: "name_desc"
+  end_mode: "stop"
+
+detect:
+  impl: "overexposure"
+  config_file: "../detect_overexposure.yaml"
+  enable_preview: false
+
+output:
+  enable_http: false
+  enable_modbus: false
+  write_csv: false

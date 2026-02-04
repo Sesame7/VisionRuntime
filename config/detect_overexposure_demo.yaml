@@ -1,4 +1,0 @@
-# Overexposure demo parameters for the built-in `overexposure` detector.
-overexp_threshold: 245
-overexp_ratio: 0.05
-downscale_factor: 0.5
