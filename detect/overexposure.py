@@ -4,6 +4,7 @@ import numpy as np
 
 from .base import register_detector
 
+
 def detect_overexposure(
     img: np.ndarray,
     threshold: int = 245,
