@@ -75,6 +75,10 @@ pip install -r requirements.txt
 python main.py --config-dir config
 ```
 
+## Deployment
+
+See `docs/deploy.md` for a Linux/Ubuntu deployment guide and systemd unit example.
+
 ## Configuration
 
 Main config must be exactly one file: `config/main_*.yaml`. Detect config is referenced by `detect.config_file`.
