@@ -124,7 +124,6 @@ class WeigaoTrayDetector:
     """
     Weigao tray inspection (3 rows with configurable columns), adapted for Smart_Camera.
 
-    - No UI/debug overlays.
     - Overlay uses denoised image as the base.
     - Cumulative drawing: green marks keep even if later stages fail.
     """
@@ -254,6 +253,13 @@ class WeigaoTrayDetector:
         self.ng_bgr = _as_bgr_triplet(overlay.get("ng_bgr"), (0, 0, 220))
         self.line_width = max(1, int(overlay.get("line_width", 2)))
 
+        dbg = p.get("dbg") or {}
+        self.dbg_show_mask = bool(dbg.get("show_mask", False))
+        self.dbg_show_strips = bool(dbg.get("show_strips", False))
+        self.dbg_show_band = bool(dbg.get("show_band", False))
+        self.dbg_bgr = (220, 0, 0)  # blue in BGR
+        self.dbg_mask_bgr = (140, 60, 0)  # darker orange in BGR
+
         self._validate()
 
     def _update_white_bounds(self) -> None:
@@ -334,6 +340,7 @@ class WeigaoTrayDetector:
         img: np.ndarray,
         rect: Tuple[int, int, int, int],
         color: Tuple[int, int, int],
+        thickness: int | None = None,
     ) -> None:
         x, y, w, h = rect
         cv2.rectangle(
@@ -341,7 +348,7 @@ class WeigaoTrayDetector:
             (int(x), int(y)),
             (int(x + w - 1), int(y + h - 1)),
             color,
-            thickness=self.line_width,
+            thickness=max(1, int(self.line_width if thickness is None else thickness)),
         )
 
     def _draw_center(
@@ -360,6 +367,29 @@ class WeigaoTrayDetector:
             color,
             thickness=self.line_width,
         )
+
+    def _draw_mask_overlay(
+        self,
+        img: np.ndarray,
+        x: int,
+        y: int,
+        mask_u8: np.ndarray,
+        color: Tuple[int, int, int],
+        alpha: float = 0.35,
+    ) -> None:
+        if mask_u8 is None or mask_u8.size == 0:
+            return
+        h, w = mask_u8.shape[:2]
+        roi = img[y : y + h, x : x + w]
+        if roi.shape[:2] != (h, w):
+            return
+        m = mask_u8 > 0
+        if not bool(np.any(m)):
+            return
+        color_img = np.empty_like(roi)
+        color_img[:] = color
+        blended = cv2.addWeighted(roi, 1.0 - float(alpha), color_img, float(alpha), 0.0)
+        roi[m] = blended[m]
 
     def detect(self, img: np.ndarray):
         try:
@@ -439,6 +469,11 @@ class WeigaoTrayDetector:
             if self.keep_largest:
                 self._keep_largest_component_inplace(core)
 
+            if overlay_img is not None and self.dbg_show_mask:
+                self._draw_mask_overlay(
+                    overlay_img, x, y, core, self.dbg_mask_bgr, alpha=0.55
+                )
+
             M = cv2.moments(core, binaryImage=True)
             m00 = float(M.get("m00", 0.0))
             if m00 <= 0.0:
@@ -491,6 +526,20 @@ class WeigaoTrayDetector:
 
             lx0, lx1 = _clamp_span_exclusive(cx_i - d - ws, cx_i - d + ws, 0, w)
             rx0, rx1 = _clamp_span_exclusive(cx_i + d - ws, cx_i + d + ws, 0, w)
+
+            if overlay_img is not None and self.dbg_show_strips:
+                self._draw_rect(
+                    overlay_img,
+                    _rect_from_inclusive(x + lx0, y + y0, x + lx1 - 1, y + y1),
+                    self.dbg_bgr,
+                    thickness=1,
+                )
+                self._draw_rect(
+                    overlay_img,
+                    _rect_from_inclusive(x + rx0, y + y0, x + rx1 - 1, y + y1),
+                    self.dbg_bgr,
+                    thickness=1,
+                )
 
             win_hsv = roi_hsv[y0 : y1 + 1, :]
             win = cv2.inRange(win_hsv, self._white_lower, self._white_upper)
@@ -616,6 +665,14 @@ class WeigaoTrayDetector:
                 xc - self.band_half_width, xc + self.band_half_width, x, x1_max
             )
 
+            if overlay_img is not None and self.dbg_show_band:
+                self._draw_rect(
+                    overlay_img,
+                    _rect_from_inclusive(x0f, y0f, x1f, y1f),
+                    self.dbg_bgr,
+                    thickness=1,
+                )
+
             if y1f <= y0f or x1f <= x0f:
                 fail_with_rects(
                     "BAND_NOT_FOUND",
@@ -677,6 +734,22 @@ class WeigaoTrayDetector:
             xR = int(x0f + R)
             x_band = float((xL + xR) / 2.0)
             y_mid = int(round((y0f + y1f) / 2.0))
+
+            if overlay_img is not None and self.dbg_show_band:
+                cv2.line(
+                    overlay_img,
+                    (int(xL), int(y0f)),
+                    (int(xL), int(y1f)),
+                    self.dbg_bgr,
+                    thickness=1,
+                )
+                cv2.line(
+                    overlay_img,
+                    (int(xR), int(y0f)),
+                    (int(xR), int(y1f)),
+                    self.dbg_bgr,
+                    thickness=1,
+                )
 
             t = 0.0 if cols <= 1 else float(slot.col) / float(cols - 1)
             base_shift = (-float(self.offset_base)) + (

@@ -1,4 +1,4 @@
-# Smart Camera
+# VisionRuntime
 
 Config-driven industrial vision service for production lines, with web HMI, Modbus output, and pluggable camera/trigger/detector modules.
 
