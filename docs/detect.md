@@ -2,8 +2,8 @@
 
 ## 1. Goals and Constraints
 
-- Single-plugin architecture: one detection plugin per project, depending on `detect/base.py` and third-party libraries.
-- Single detection thread: currently only supports 1 DetectWorker; no concurrency/multi-instance (future extension).
+- Single-plugin architecture: one detection plugin per project, implemented against `detect/base.py` and any required third-party libraries.
+- Single detection thread: currently supports one `DetectWorker`; no concurrency/multi-instance support yet (future extension).
 - Queue decoupling: consumes the Camera→Detect queue; Detect→Output has no queue—after processing, results fan out directly.
 - Independent configuration: the main config specifies plugin name and its config file; detector-specific validation (if any) is done inside the detector implementation.
 - Unified color: 3-channel images are always BGR (OpenCV semantics). If RGB is needed, the plugin must explicitly convert.
@@ -31,8 +31,8 @@
 
 ## 5. Logging
 
-- Detection info is surfaced upward through the returned result (`message/data`). Terminal logs follow the global policy.
+- Detection information is returned upstream through the result (`message` / `data`). Terminal logs follow the global logging policy.
 
-## 6. Reserved
+## 6. Future Extensions
 
 - If multi-thread detection or more structured output is needed, implement by adding Workers or extending the `data` field, without changing the primary contract.

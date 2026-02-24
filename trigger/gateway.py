@@ -8,7 +8,7 @@ from typing import Callable, Optional, Set
 
 from core.contracts import TriggerEvent
 
-L = logging.getLogger("sci_cam.gateway")
+L = logging.getLogger("vision_runtime.gateway")
 
 
 class TriggerGateway:

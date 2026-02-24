@@ -18,7 +18,7 @@ from core.pymodbus_compat import (
 
 from core import runtime
 
-L = logging.getLogger("sci_cam.modbus.io")
+L = logging.getLogger("vision_runtime.modbus.io")
 
 
 def _require_values(

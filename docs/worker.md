@@ -11,7 +11,7 @@
 - `CameraWorker`: pulls triggers, grabs frames, enqueues detect tasks.
 - `DetectWorker`: consumes detect tasks, runs detector, emits results.
 - `DetectQueueManager`: queue + DropHead policy (drop oldest on full).
-- `GlobalIdManager`: monotonic per-day trigger id.
+- `GlobalIdManager`: monotonic trigger ID that resets daily.
 
 ## 3. Flow (Simplified)
 

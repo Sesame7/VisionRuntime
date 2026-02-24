@@ -3,8 +3,8 @@
 ## 1. Goals and Scope
 
 - Provide a unified wrapper and lifecycle management for core synchronous threads such as camera acquisition and image detection.
-- `SystemRuntime` is responsible for starting/stopping Workers, emitting a lightweight heartbeat, and uses async helpers (`run_async` / `spawn_background_task` / `shutdown_loop`) from this module.
-- Non-goals: do not directly operate camera SDKs / industrial protocol libraries; do not implement Modbus/TCP/HTTP details; do not manage across processes; no auto-restart in the first version.
+- `SystemRuntime` is responsible for starting/stopping Workers/triggers/output, emitting a lightweight heartbeat, and uses async helpers (`run_async` / `spawn_background_task` / `shutdown_loop`) from this module.
+- Non-goals: do not directly operate camera SDKs / industrial protocol libraries; do not implement Modbus/TCP/HTTP protocol details; do not manage cross-process behavior; no auto-restart in the current implementation.
 
 ## 2. BaseWorker
 
@@ -13,7 +13,9 @@
 
 ## 3. Queues and Backpressure
 
-- The only main queue: Camera → Detect, using a DropHead strategy (when full, drop the oldest and immediately generate an NG result to Output).
+- Main runtime queues:
+  - Trigger queue (`TriggerGateway` → `CameraWorker`), bounded (current default capacity `1`, internal runtime parameter); on overflow, drop the oldest trigger and synthesize an ERROR result.
+  - Camera → Detect queue (`DetectQueueManager`), bounded DropHead; on overflow, drop the oldest detect task and synthesize an ERROR result.
 - Detect → Output has no queue; once detection finishes, it fans out directly.
 - DropHead synthesized result: for a dropped frame, generate an OutputRecord with `result="ERROR"` and `message` prefixed with `"Error: queue overflow"`; keep `captured_at` from the original result and set `detected_at` to the current time to distinguish counting.
 - Queue items and result fields follow `contracts` and do not need to be expanded in this file.
@@ -31,8 +33,8 @@
 
 ## 6. SystemRuntime
 
-- Responsibilities: create the main queue and Camera/Detect Workers; start/stop everything uniformly; manage the Trigger set and OutputManager; use `core/runtime` async helpers to start/stop async services; emit heartbeat ticks.
-- Startup order: load config and registries → build queues and Workers → start Trigger → start Camera/Detect → start Output → start async services (via `run_async`/`spawn_background_task`, return handles after services are bound).
+- Responsibilities: coordinate start/stop order uniformly; manage the Trigger set and OutputManager; emit heartbeat ticks; provide reset/queue-drain behavior. Queue/Worker construction and wiring are performed by `build_runtime(...)`.
+- Startup order (current implementation): load config and registries → `build_runtime(...)` constructs queues/workers/channels → start `CameraWorker`/`DetectWorker` → start output channels → start heartbeat → start trigger sources.
 - Shutdown order: stop trigger sources first → stop acquisition → stop detection/Output → close async services (gracefully close handles) → `shutdown_loop()` → exit.
 - External interface: `start()` / `stop()`.
 

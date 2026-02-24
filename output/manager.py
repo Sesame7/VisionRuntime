@@ -23,11 +23,11 @@ class OutputChannel(Protocol):
     def publish_heartbeat(self, ts: float | None = None): ...
 
 
-L = logging.getLogger("sci_cam.output.manager")
+L = logging.getLogger("vision_runtime.output.manager")
 
 
 class ResultStore:
-    L = logging.getLogger("sci_cam.result_store")
+    L = logging.getLogger("vision_runtime.result_store")
 
     def __init__(self, base_dir: str, max_records: int = 10, write_csv: bool = True):
         self.base_dir = base_dir

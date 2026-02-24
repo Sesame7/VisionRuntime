@@ -10,14 +10,14 @@
 
 - **L1 Built-in defaults**: dataclass default values in code (queue capacity, Modbus heartbeat interval, grab timeout, etc.), project-wide and site-independent.
 - **L2 Site main config (main)**: describes the complete runtime environment of the project + site (runtime/communication/camera/trigger/output/which detection algorithm to use and its config file).
-- **L3 Detection algorithm parameters (detect)**: frequently tuned detection parameters (thresholds/ROI/switches, etc.), optionally supporting hot reload.
+- **L3 Detection algorithm parameters (detect)**: frequently tuned detection parameters (thresholds/ROI/switches, etc.). Hot reload is not supported in the current implementation (restart required).
 
 ## 3. Directory and Naming Conventions
 
 - All configs live under `config/`; it stores only files and examples for the current project/site.
-- Main config (single load): `config/main_<PROJECT>_<SITE>.yaml`, and the filename MUST include both project and site. Loader rule: there must be **exactly 1** `main_*.yml/yaml` in `config/`; 0 or >1 → startup failure, and list the discovered files.
+- Main config (single load): recommended naming `config/main_<PROJECT>_<SITE>.yaml`. Loader rule: there must be **exactly 1** `main_*.yml/yaml` in the selected config directory; 0 or >1 → startup failure, and list the discovered files.
 - Main config template: `config/example_main_*.yaml` (e.g. `example_main_weigao_tray.yaml`), for copying only; it is never loaded.
-- Detection config (actual use): `config/detect_<PROJECT>_<SITE>.yaml`, explicitly specified by `detect.config_file` in the main config (relative to `config/`, absolute paths may also be supported; validate existence at startup).
+- Detection config (actual use): `config/detect_<PROJECT>_<SITE>.yaml`, explicitly specified by `detect.config_file` in the main config (typically relative to `config/`; absolute paths are also supported and validated at startup).
 - Detection config examples: `config/detect_overexposure.yaml` (never auto-loaded; examples only).
 - Test main config lives in `config/tests/main_test.yaml` to avoid `main_*.yaml` collisions.
 
@@ -26,13 +26,13 @@
 1) Construct the default config object (dataclass), apply known fields, and warn on unknown fields to prevent typos being silently ignored.  
 2) Scan and load the main config `main_*.yaml`, bind blocks into Runtime/Camera/Trigger/Output/Detect metadata, etc.; on validation failure, provide “file + field path”.  
 2.5) Optionally import extra plugin modules according to the `imports` list from the main config (string Python import paths). Import failure is a startup error (must include filename + failing import path). An empty/missing list is allowed because camera/trigger/detect modules can be lazily imported when instantiated.  
-3) Read `detect.config_file` from the main config; load detection parameter YAML under `config/`, and bind it into DetectConfig.  
-4) Pass the config object to `SystemRuntime` to construct module instances; use `detect.impl` to decide which detection entry to import, and pass DetectConfig to it.  
+3) Read `detect.config_file` from the main config; load the detection-parameter YAML (typically under `config/`) into `detect_params`.  
+4) Pass the loaded config object to the runtime assembly path; use `detect.impl` to choose the detector implementation and pass `detect_params` to it.  
 5) Detection params are not validated here; detectors should validate their own parameters if needed.
 
 ## 5. Configuration Format Rules (Restricted YAML Subset)
 
-- Indent with 2 spaces; do not use anchors/aliases, tags, custom types; booleans must be lowercase `true`/`false`; numbers are decimal; single-document per file (do not use `---`).
+- Indent with 2 spaces; do not use anchors/aliases, tags, or custom types; booleans must be lowercase `true`/`false`; numbers are decimal; use a single document per file (do not use `---`).
 - Config describes only behavior parameters and wiring (ports/IPs, queue sizes, which detection config to choose); do not duplicate data structure fields from `core/contracts` in config.
 - Sensitive info (passwords/keys, etc.) must not be written into YAML; use environment variables or a separate secrets file.
 
@@ -46,7 +46,8 @@
   - `save_dir`: base directory for runtime outputs (images/CSV).
   - `max_runtime_s`: auto-stop after N seconds (0 = unlimited).
   - `history_size`: number of recent records kept in memory for HMI.
-  - `max_pending_triggers`: trigger queue capacity (camera→detect backpressure).
+  - `max_pending_triggers`: Camera→Detect queue capacity (detect task backlog).
+  - Trigger-event queue capacity is currently an internal runtime parameter (default `1`) and is not exposed in the YAML config.
   - `debounce_ms`: trigger debounce window.
   - `log_level`: global log level.
 - `imports`
@@ -80,6 +81,6 @@
 ## 8. Alignment with Other Modules
 
 - Data contracts/channels/time semantics: `core/contracts` is the single source of truth.  
-- Backpressure and queues: the only backpressure point is the Camera→Detect queue; related capacity/strategy is in runtime config; Detect→Output has no queue.  
+- Backpressure and queues: Detect→Output has no queue. Current runtime also uses a bounded trigger queue before CameraWorker (default capacity `1`, internal parameter, not YAML-configurable yet); `runtime.max_pending_triggers` controls the Camera→Detect queue.  
 - Async boundary: config contains only business parameters like network/timeouts/retries; threading/loop/shutdown strategy is uniformly managed by `SystemRuntime` in `core/runtime`.  
 - Trigger/Camera/Detect/Output read their own config blocks and do not parse other modules’ fields.

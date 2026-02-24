@@ -3,7 +3,7 @@
 ## 1. Goals and Boundaries
 
 - Provide lightweight debug/integration tools independent of the production pipeline, intended for development or on-site troubleshooting.
-- Tools live under `tools/` and are driven by CLI arguments; keep them simple. They do not read production config files and do not write into production data/log directories.
+- Tools live under `tools/` and are CLI-driven; keep them simple. They do not read production config files and do not write to production data/log directories.
 - By default, logs are terminal-only. When needed, provide an optional `--log-file` to write logs to a user-specified path.
 
 ## 2. Tool List (Current)
@@ -52,6 +52,6 @@
 ## 8. General Notes
 
 - No production config dependency: all parameters come from CLI with conservative defaults.
-- Do not occupy production ports: host/port should be parameterized; default to ports different from production.
+- Do not occupy production ports: host/port should be configurable; defaults should differ from production ports where practical.
 - Do not modify production data: do not write into `data/`, `logs/`, or other production directories. If writing results is needed, require an explicit user-specified path.
 - Dependencies: prefer the same dependency versions as the main project; if extra dependencies are required, document them in README/comments.

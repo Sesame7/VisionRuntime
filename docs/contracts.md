@@ -68,8 +68,8 @@
 ## 6. Error and Status Conventions
 
 - Do not invent error codes; preserve vendor/real error text in `error` or `message`, and use unified prefix classification (NG/Timeout/Error).
-- Counting semantics (HMI/statistics): NG includes only messages prefixed with `"NG:"`; Timeout/Error are counted as ERROR; TOTAL includes all. PLC/Modbus side only cares whether to exclude: Timeout/Error and business NG are mapped together as NG signal; OK is mapped to OK signal.
-- Queue overflow: DropHead synthesized result must use `"Error: queue overflow"` prefix, inherit `captured_at` from camera time, and set `detected_at` to the generation time.
+- Counting semantics (HMI/statistics): current `ResultStore` counts by `OutputRecord.result` (`OK` / `NG` / `TIMEOUT` / others). HMI reports `error = error_count + timeout_count`. On the PLC/Modbus side, business NG and Timeout/Error are all mapped to the NG signal; OK maps to the OK signal.
+- Queue overflow: synthesized overflow results use an `"Error: queue overflow"` message prefix and `result_code="QUEUE_OVERFLOW"`. Timestamp preservation depends on where overflow occurs (trigger-queue overflow uses trigger time; detect-queue overflow preserves `captured_at` from the dropped task).
 - `ok/success` semantics:
   - Camera side: `success` means whether acquisition succeeded.
   - Detect side: `ok` means whether the business decision passed.

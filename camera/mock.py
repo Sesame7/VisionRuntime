@@ -13,7 +13,7 @@ import cv2
 
 from camera.base import BaseCamera, CameraConfig, CaptureResult, register_camera
 
-L = logging.getLogger("sci_cam.camera.mock")
+L = logging.getLogger("vision_runtime.camera.mock")
 
 _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 _ORDER_CHOICES = {

@@ -14,7 +14,7 @@ import numpy as np
 
 from camera.base import BaseCamera, CameraConfig, CaptureResult, register_camera
 
-L = logging.getLogger("sci_cam.camera.opt")
+L = logging.getLogger("vision_runtime.camera.opt")
 
 SCI_CAMERA_OK = 0
 

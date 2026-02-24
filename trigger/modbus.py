@@ -6,7 +6,7 @@ import logging
 from core import runtime
 from trigger.base import BaseTrigger, TriggerConfig, register_trigger
 
-L = logging.getLogger("sci_cam.trigger.modbus")
+L = logging.getLogger("vision_runtime.trigger.modbus")
 
 
 @register_trigger("modbus")
