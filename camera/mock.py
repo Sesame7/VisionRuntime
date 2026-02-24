@@ -147,7 +147,7 @@ class MockCamera(BaseCamera):
             return self._paths[-1]
         return None
 
-    def capture_once(self, idx):
+    def capture_once(self, idx, triggered_at=None):
         path = self._next_path()
         if not path:
             return CaptureResult(
@@ -181,7 +181,7 @@ class MockCamera(BaseCamera):
             device_id="mock",
             path=None,
             image=arr,
-            timings={"read_ms": read_ms},
+            timings={"grab_ms": read_ms},
             captured_at=captured_at,
         )
 

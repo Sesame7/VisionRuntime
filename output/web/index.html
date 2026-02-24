@@ -131,7 +131,7 @@ function renderRecords(records, maxRecords){
     tr.innerHTML = `<td>${String(id).padStart(ID_PAD_LEN,'0')}</td>
                     <td class="${cls}">${rec.result}</td>
                     <td>${rec.triggered_at?.slice(0,10) || ''}</td>
-                    <td>${rec.triggered_at?.slice(11,23) || ''}</td>
+                    <td>${rec.triggered_at?.slice(11,24) || ''}</td>
                     <td>${duration.toFixed(1)}</td>`;
     els.tbody.appendChild(tr);
   });
@@ -161,7 +161,7 @@ async function refresh(){
         const r0 = showRecs[0];
         const id0 = r0.trigger_seq || 0;
         const date0 = r0.triggered_at?.slice(0,10) || '';
-        const time0 = r0.triggered_at?.slice(11,23) || '';
+        const time0 = r0.triggered_at?.slice(11,24) || '';
         const cls0 = resultClass(r0.result);
         els.statusTime.className = `status-time ${cls0}`;
         els.statusTime.innerText = `${String(id0).padStart(ID_PAD_LEN,'_')} ${date0} ${time0}`;

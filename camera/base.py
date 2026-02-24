@@ -6,6 +6,7 @@ import importlib
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, Type
 
 from core.contracts import CaptureResult
@@ -43,7 +44,7 @@ class BaseCamera(ABC):
         self.lock = threading.Lock()
 
     @abstractmethod
-    def capture_once(self, idx) -> CaptureResult:
+    def capture_once(self, idx, triggered_at: datetime | None = None) -> CaptureResult:
         """Perform a single capture, returning CaptureResult."""
 
     @contextmanager
