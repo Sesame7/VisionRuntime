@@ -402,7 +402,7 @@ def build_runtime(
     http_port: int = 8080,
     enable_http: bool = True,
     max_pending_triggers: int = 50,
-    max_pending_trigger_events: int = 1,
+    max_pending_trigger_events: int = 2,
     enable_modbus: bool = False,
     enable_modbus_io: bool | None = None,
     modbus_host: str = "0.0.0.0",
@@ -426,7 +426,7 @@ def build_runtime(
     )
     from output.manager import OutputManager, ResultStore
 
-    # Trigger events are intentionally kept almost non-buffered by default (1-slot queue).
+    # Trigger events are intentionally kept lightly buffered by default (2-slot queue).
     trigger_queue_capacity = max(1, int(max_pending_trigger_events))
     detect_queue_capacity = max(1, int(max_pending_triggers))
     trigger_queue: queue.Queue = queue.Queue(maxsize=trigger_queue_capacity)

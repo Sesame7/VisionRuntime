@@ -47,7 +47,7 @@
   - `max_runtime_s`: auto-stop after N seconds (0 = unlimited).
   - `history_size`: number of recent records kept in memory for HMI.
   - `max_pending_triggers`: Camera→Detect queue capacity (detect task backlog).
-  - Trigger-event queue capacity is currently an internal runtime parameter (default `1`) and is not exposed in the YAML config.
+  - Trigger-event queue capacity is currently an internal runtime parameter (default `2`) and is not exposed in the YAML config.
   - `debounce_ms`: trigger debounce window.
   - `log_level`: global log level.
 - `imports`
@@ -60,6 +60,7 @@
   - `image_dir`, `order`, `end_mode` (mock camera only; see camera doc).
 - `trigger`
   - Global filters: `global_min_interval_ms`, `high_priority_cooldown_ms`, `high_priority_sources`/`low_priority_sources`, `ip_whitelist`.
+  - Source names used by `high_priority_sources` / `low_priority_sources` are case-sensitive runtime identifiers (current implementation uses `"TCP"`, `"WEB"`, `"MODBUS"`, etc.).
   - Source enablement and required params are grouped by source:
     - `trigger.tcp`: `enabled`, `word`
     - `trigger.modbus`: `enabled`, `poll_ms`
@@ -81,6 +82,6 @@
 ## 8. Alignment with Other Modules
 
 - Data contracts/channels/time semantics: `core/contracts` is the single source of truth.  
-- Backpressure and queues: Detect→Output has no queue. Current runtime also uses a bounded trigger queue before CameraWorker (default capacity `1`, internal parameter, not YAML-configurable yet); `runtime.max_pending_triggers` controls the Camera→Detect queue.  
+- Backpressure and queues: Detect→Output has no queue. Current runtime also uses a bounded trigger queue before CameraWorker (default capacity `2`, internal parameter, not YAML-configurable yet); `runtime.max_pending_triggers` controls the Camera→Detect queue.  
 - Async boundary: config contains only business parameters like network/timeouts/retries; threading/loop/shutdown strategy is uniformly managed by `SystemRuntime` in `core/runtime`.  
 - Trigger/Camera/Detect/Output read their own config blocks and do not parse other modules’ fields.
