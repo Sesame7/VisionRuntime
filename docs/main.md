@@ -17,7 +17,7 @@
 ├─output/            # manager.py, channel implementations, web assets
 ├─trigger/           # base.py, gateway.py, trigger source implementations
 ├─tools/             # optional, scripts/helpers
-├─data/              # runtime outputs (e.g., camera images and records.csv under default save_dir)
+├─data/              # runtime outputs (e.g., images/YYYY-MM-DD/* and same-day records.csv)
 ├─logs/              # optional debug/output logs; may be absent or empty in production
 ├─main.py            # entrypoint: load config and start SystemRuntime
 └─docs/              # design docs (optional)
@@ -33,7 +33,7 @@
 ## 4. Data and Logs
 
 - Image dumping: when `camera.save_images` is enabled, images are written under `<runtime.save_dir>/images` (extension controlled by camera config). Only the Camera acquisition path may optionally save raw images; other modules do not write image files.
-- Log/result files: production runtime prints to terminal only; during debugging or production result archiving, Output may write result summaries (for example `<runtime.save_dir>/records.csv`) and optional channel-specific logs. Camera SDK auto-generated directories such as `DrvLog`/`System`/`SystemLog` are out of scope of this design.
+- Log/result files: production runtime prints to terminal only; during debugging or production result archiving, Output may write result summaries (for example `<runtime.save_dir>/images/YYYY-MM-DD/records.csv`) and optional channel-specific logs. Camera SDK auto-generated directories such as `DrvLog`/`System`/`SystemLog` are out of scope of this design.
 
 ## 5. Module Responsibility Anchors
 

@@ -131,7 +131,7 @@ camera:
 ## Outputs
 
 - Images: `<runtime.save_dir>/images` when `camera.save_images` is true (default)
-- CSV: `<runtime.save_dir>/records.csv` when `output.write_csv` is true
+- CSV: `<runtime.save_dir>/images/YYYY-MM-DD/records.csv` when `output.write_csv` is true
 
 ## Contributing
 

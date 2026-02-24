@@ -31,7 +31,7 @@ class ResultStore:
 
     def __init__(self, base_dir: str, max_records: int = 10, write_csv: bool = True):
         self.base_dir = base_dir
-        self.csv_path = os.path.join(base_dir, "records.csv")
+        self.csv_root_dir = os.path.join(base_dir, "images")
         self._max_records = max_records
         self._records: Deque[OutputRecord] = deque(maxlen=max_records)
         self._latest_overlay: Optional[Tuple[bytes, str]] = None
@@ -52,7 +52,7 @@ class ResultStore:
             else None
         )
         if write_csv:
-            os.makedirs(base_dir, exist_ok=True)
+            os.makedirs(self.csv_root_dir, exist_ok=True)
         # Fresh start on each run; do not preload historical CSV into registers.
         if self._writer_thread:
             self._writer_thread.start()
@@ -159,10 +159,11 @@ class ResultStore:
                 break
 
     def _append_csv(self, rec: OutputRecord):
-        write_header = not os.path.exists(self.csv_path)
+        csv_path = self._csv_path_for_record(rec)
+        write_header = not os.path.exists(csv_path)
         t_date, t_time = _fmt_date_time(rec.triggered_at)
         save_time = _fmt_time(rec.detected_at)
-        with open(self.csv_path, "a", encoding="utf-8") as f:
+        with open(csv_path, "a", encoding="utf-8") as f:
             if write_header:
                 f.write(
                     "id,trigger_date,trigger_time,save_finish_time,result,result_code,duration_ms,remark\n"
@@ -170,6 +171,12 @@ class ResultStore:
             f.write(
                 f"{rec.trigger_seq},{t_date},{t_time},{save_time},{rec.result},{rec.result_code or ''},{(rec.duration_ms or 0.0):.3f},{rec.remark}\n"
             )
+
+    def _csv_path_for_record(self, rec: OutputRecord) -> str:
+        date_key = _record_date_key(rec)
+        day_dir = os.path.join(self.csv_root_dir, date_key)
+        os.makedirs(day_dir, exist_ok=True)
+        return os.path.join(day_dir, "records.csv")
 
 
 def _fmt_date_time(dt: Optional[datetime]) -> Tuple[str, str]:
@@ -180,6 +187,19 @@ def _fmt_date_time(dt: Optional[datetime]) -> Tuple[str, str]:
 def _fmt_time(dt: Optional[datetime]) -> str:
     ref = dt or datetime.now(timezone.utc)
     return ref.strftime("%H:%M:%S.%f")[:-3]
+
+
+def _record_date_key(rec: OutputRecord) -> str:
+    ref = (
+        rec.captured_at
+        or rec.detected_at
+        or rec.triggered_at
+        or datetime.now(timezone.utc)
+    )
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    local_ref = ref.astimezone()
+    return local_ref.date().isoformat()
 
 
 class OutputManager:
