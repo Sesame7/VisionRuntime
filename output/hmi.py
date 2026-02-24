@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 if TYPE_CHECKING:  # pragma: no cover - type hints only
     from core.runtime import AppContext
 
-L = logging.getLogger("sci_cam.output.hmi")
+L = logging.getLogger("vision_runtime.output.hmi")
 
 
 class _ApiServer:

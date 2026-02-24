@@ -5,7 +5,7 @@ from typing import Callable, Dict, Protocol, Tuple
 import cv2
 import numpy as np
 
-L = logging.getLogger("sci_cam.detection")
+L = logging.getLogger("vision_runtime.detection")
 
 
 class Detector(Protocol):

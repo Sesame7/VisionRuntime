@@ -6,7 +6,7 @@ Config-driven industrial vision service for production lines, with web HMI, Modb
 
 - Pluggable camera drivers (mock, raspi, hik/opt when available)
 - Trigger inputs (TCP, Modbus, Web)
-- Outputs (HMI web, Modbus, CSV)
+- Outputs (Web HMI, Modbus, CSV)
 - Config-driven runtime via YAML
 
 ## Architecture
@@ -89,7 +89,7 @@ Core sections:
 - `camera`: driver, exposure, image save options
 - `trigger`: TCP/Modbus settings and filters
 - `comm`: TCP/Modbus/HTTP ports
-- `detect`: detector impl and config file
+- `detect`: detector implementation and config file
 - `output`: enable HMI/Modbus/CSV
 
 ### Raspberry Pi camera (Picamera2)

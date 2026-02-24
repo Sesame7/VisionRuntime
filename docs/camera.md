@@ -2,8 +2,10 @@
 
 ## 1. Scope and Constraints
 
-- Supported adapters: `opt`, `hik`, and `mock`. All are single-frame capture on soft trigger; no concurrent grabbing.
-- Camera internal parameters are preset via vendor tools; this program does not modify exposure/gain/trigger mode.
+- Supported adapters: `opt`, `hik`, `raspi`, and `mock`. In the current runtime, all operate in single-frame capture mode; no concurrent grabbing.
+- Camera parameter behavior depends on adapter:
+  - `opt` / `hik`: many settings are typically preset by vendor tools/SDK-side configuration.
+  - `raspi`: Picamera2 controls (AE/AWB/exposure/gain/frame duration, etc.) may be applied from config during `session()`.
 - Responsibilities: select device, soft trigger → grab → convert to target output format (bgr8/mono8), optionally save to disk; does not manage queues/backpressure.
 - Image channel/shape/dtype conventions follow `core/contracts` and are not repeated here.
 - Configuration items (device selection, grab timeout, retries, format, saving switch/path, etc.) are defined in `config.md`.
@@ -15,7 +17,7 @@
 ## 3. BaseCamera Abstraction
 
 - Interface: `session()` (context manager) + `capture_once(idx)`; optional `get_stats()` is not used.
-- `capture_once`: serialized and thread-safe; retry per configuration; flow is soft trigger → grab → SDK conversion → optional save → fill `CaptureResult` (save failure does not affect the return; just log a warning).
+- `capture_once`: serialized and thread-safe; retries follow configuration; the flow is soft trigger → grab → SDK conversion → optional save → populate `CaptureResult` (save failure does not affect the return value; log a warning only).
 - Adapter-internal locking/buffering strategy is up to the implementation, but external semantics must remain stable.
 
 ## 4. Queues and Backpressure
@@ -37,6 +39,7 @@
 
 - `opt`: loads vendor SDK at import time; errors are raised if the SDK library is missing.
 - `hik`: loads vendor SDK at import time; errors are raised if the SDK library is missing.
+- `raspi`: depends on Picamera2; camera controls may be applied from config.
 - `mock`: uses OpenCV to read local images and respects `order`/`end_mode`.
 
 ## 7. Logging and Errors

@@ -13,7 +13,7 @@ from core.contracts import CaptureResult, OutputRecord
 from core.runtime import BaseWorker
 from detect import encode_image_jpeg
 
-L = logging.getLogger("sci_cam.workers")
+L = logging.getLogger("vision_runtime.workers")
 
 
 @dataclass

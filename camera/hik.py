@@ -13,7 +13,7 @@ import numpy as np
 
 from camera.base import BaseCamera, CameraConfig, CaptureResult, register_camera
 
-L = logging.getLogger("sci_cam.camera.hik")
+L = logging.getLogger("vision_runtime.camera.hik")
 
 MV_OK = 0
 

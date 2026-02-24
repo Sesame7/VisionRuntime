@@ -15,7 +15,7 @@ from trigger import TriggerConfig, create_trigger
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="SciCam capture service (config-driven)",
+        description="VisionRuntime capture service (config-driven)",
     )
     p.add_argument(
         "--config-dir", default="config", help="Directory containing main_*.yaml"
