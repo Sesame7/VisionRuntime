@@ -367,8 +367,12 @@ def _dst_pixel_type(output_pixel_format: str):
     return TARGET_COLOR
 
 
-def _format_filename(frame_id, ext, now: Optional[datetime] = None):
-    ts = (now or datetime.now()).strftime("%H-%M-%S")
+def _format_filename(frame_id, ext, ts_utc: Optional[datetime] = None):
+    ref = ts_utc or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    ref = ref.astimezone(timezone.utc)
+    ts = ref.strftime("%H-%M-%S.%f")[:-3] + "Z"
     return f"{ts}_{int(frame_id):05d}{ext}"
 
 
@@ -379,18 +383,22 @@ def _process_payload(
     payload,
     cfg: CameraConfig,
     frame_id: Optional[int] = None,
+    trigger_ts_utc: Optional[datetime] = None,
 ) -> Tuple[Optional[Tuple[Optional[str], np.ndarray, datetime]], Optional[str]]:
     dst_type = _dst_pixel_type(cfg.output_pixel_format)
     conversion, err = SDK.convert_payload(payload, dst_type)
     if not conversion:
         return None, err
     buf, width, height, dst_type, attr = conversion
-    now_local = datetime.now()
     now_utc = datetime.now(timezone.utc)
     save_ret = SCI_CAMERA_OK
     path = None
     if cfg.save_images:
-        date_dir = now_local.strftime("%Y-%m-%d")
+        file_ts_utc = trigger_ts_utc or now_utc
+        if file_ts_utc.tzinfo is None:
+            file_ts_utc = file_ts_utc.replace(tzinfo=timezone.utc)
+        file_ts_utc = file_ts_utc.astimezone(timezone.utc)
+        date_dir = file_ts_utc.date().isoformat()
         if _DATE_CACHE["date"] != date_dir or not _DATE_CACHE["path"]:
             target_dir = os.path.join(cfg.save_dir, date_dir)
             os.makedirs(target_dir, exist_ok=True)
@@ -399,7 +407,7 @@ def _process_payload(
         target_dir = _DATE_CACHE["path"]
         file_id = frame_id if frame_id is not None else attr.frameID
         path = os.path.join(
-            target_dir, _format_filename(file_id, cfg.ext, now=now_local)
+            target_dir, _format_filename(file_id, cfg.ext, ts_utc=file_ts_utc)
         )
         save_ret = SDK.save_image(path, dst_type, buf, width, height)
         if save_ret != SCI_CAMERA_OK:
@@ -444,7 +452,7 @@ class OptSciCamera(BaseCamera):
     def _grab(self):
         return SDK.grab_payload(self.handle)
 
-    def capture_once(self, idx):
+    def capture_once(self, idx, triggered_at: Optional[datetime] = None):
         last_err = None
         for _ in range(self.cfg.max_retry_per_frame):
             trig_ret = self._trigger()
@@ -460,7 +468,12 @@ class OptSciCamera(BaseCamera):
             grab_ms = (time.perf_counter() - step_t) * 1000
 
             try:
-                result, err = _process_payload(payload, self.cfg, frame_id=idx)
+                result, err = _process_payload(
+                    payload,
+                    self.cfg,
+                    frame_id=idx,
+                    trigger_ts_utc=triggered_at,
+                )
                 if err:
                     last_err = err
                     continue

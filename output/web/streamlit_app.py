@@ -114,7 +114,7 @@ def get_last_tick(status_data: dict | None):
 
 
 def format_trigger_dt(value: str) -> tuple[str, str]:
-    return value[:10], value[11:23]
+    return value[:10], value[11:24]
 
 
 def build_table_html(records: list[dict]) -> str:
@@ -196,7 +196,7 @@ with right:
             if latest:
                 latest_id = str(latest.get("trigger_seq", 0)).rjust(5, "_")
                 latest_dt = latest.get("triggered_at", "")
-                latest_line = f"<span style='color:{title_color}'>{latest_id} {latest_dt.replace('T', ' ').replace('Z', '')}</span>"
+                latest_line = f"<span style='color:{title_color}'>{latest_id} {latest_dt.replace('T', ' ')}</span>"
                 st.markdown(latest_line, unsafe_allow_html=True)
             else:
                 st.write("Idle")

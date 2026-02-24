@@ -31,12 +31,12 @@ class AcqTask:
 class GlobalIdManager:
     def __init__(self):
         self._lock = threading.Lock()
-        self._current_day = datetime.now().date()
+        self._current_day = datetime.now(timezone.utc).date()
         self._counter = 0
 
     def next_id(self) -> int:
         with self._lock:
-            today = datetime.now().date()
+            today = datetime.now(timezone.utc).date()
             if today != self._current_day:
                 self._current_day = today
                 self._counter = 0
@@ -45,7 +45,7 @@ class GlobalIdManager:
 
     def reset(self):
         with self._lock:
-            self._current_day = datetime.now().date()
+            self._current_day = datetime.now(timezone.utc).date()
             self._counter = 0
 
 
@@ -110,7 +110,7 @@ class CameraWorker(BaseWorker):
             try:
                 res: CaptureResult
                 with self.camera.lock:
-                    res = self.camera.capture_once(frame_id)
+                    res = self.camera.capture_once(frame_id, triggered_at=triggered_at)
                 device_id = str(
                     getattr(res, "device_id", "")
                     or getattr(getattr(self.camera, "cfg", None), "device_index", "")

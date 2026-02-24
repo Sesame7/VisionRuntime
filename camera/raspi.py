@@ -58,7 +58,7 @@ class RaspiCamera(BaseCamera):
         if settle_ms > 0:
             time.sleep(settle_ms / 1000.0)
 
-    def capture_once(self, idx):
+    def capture_once(self, idx, triggered_at=None):
         if not self._cam:
             return CaptureResult(
                 success=False,

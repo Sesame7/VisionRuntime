@@ -3,6 +3,7 @@
 import argparse
 import logging
 import os
+import time
 
 import cv2
 
@@ -40,8 +41,10 @@ def setup_logging(verbose: bool, log_level: str = ""):
             "critical": logging.CRITICAL,
         }
         level = level_map.get(str(log_level or "").strip().lower(), logging.INFO)
+    # Use UTC for all %(asctime)s timestamps in logs.
+    logging.Formatter.converter = time.gmtime
     logging.basicConfig(
-        level=level, format="%(asctime)s [%(levelname)s] %(message)s", force=True
+        level=level, format="%(asctime)sZ [%(levelname)s] %(message)s", force=True
     )
     if not verbose:
         # Silence noisy third-party info logs (e.g., pymodbus internal "Server listening" messages).

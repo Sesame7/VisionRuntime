@@ -505,8 +505,12 @@ def _image_type_from_path(path: str) -> int:
     return MV_Image_Bmp
 
 
-def _format_filename(frame_id, ext, now: Optional[datetime] = None):
-    ts = (now or datetime.now()).strftime("%H-%M-%S")
+def _format_filename(frame_id, ext, ts_utc: Optional[datetime] = None):
+    ref = ts_utc or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    ref = ref.astimezone(timezone.utc)
+    ts = ref.strftime("%H-%M-%S.%f")[:-3] + "Z"
     return f"{ts}_{int(frame_id):05d}{ext}"
 
 
@@ -548,17 +552,21 @@ def _process_frame(
     frame: MV_FRAME_OUT,
     cfg: CameraConfig,
     frame_id: Optional[int],
+    trigger_ts_utc: Optional[datetime] = None,
 ) -> Tuple[Optional[Tuple[Optional[str], np.ndarray, datetime]], Optional[str]]:
     converted, err = _convert_frame(cam, frame, cfg)
     if not converted:
         return None, err
     buf, buf_len, width, height = converted
-    now_local = datetime.now()
     now_utc = datetime.now(timezone.utc)
     path = None
     save_ret = MV_OK
     if cfg.save_images:
-        date_dir = now_local.strftime("%Y-%m-%d")
+        file_ts_utc = trigger_ts_utc or now_utc
+        if file_ts_utc.tzinfo is None:
+            file_ts_utc = file_ts_utc.replace(tzinfo=timezone.utc)
+        file_ts_utc = file_ts_utc.astimezone(timezone.utc)
+        date_dir = file_ts_utc.date().isoformat()
         if _DATE_CACHE["date"] != date_dir or not _DATE_CACHE["path"]:
             target_dir = os.path.join(cfg.save_dir, date_dir)
             os.makedirs(target_dir, exist_ok=True)
@@ -567,7 +575,7 @@ def _process_frame(
         target_dir = _DATE_CACHE["path"]
         file_id = frame_id if frame_id is not None else int(frame.stFrameInfo.nFrameNum)
         path = os.path.join(
-            target_dir, _format_filename(file_id, cfg.ext, now=now_local)
+            target_dir, _format_filename(file_id, cfg.ext, ts_utc=file_ts_utc)
         )
         save_ret = _save_image(
             cam, path, _output_pixel_type(cfg), buf, buf_len, width, height
@@ -593,7 +601,7 @@ class HikCamera(BaseCamera):
         super().__init__(cfg)
         self.cam = MvCamera()
 
-    def capture_once(self, idx):
+    def capture_once(self, idx, triggered_at: Optional[datetime] = None):
         last_err = None
         for _ in range(self.cfg.max_retry_per_frame):
             trig_ret = self.cam.trigger()
@@ -610,7 +618,13 @@ class HikCamera(BaseCamera):
             grab_ms = (time.perf_counter() - step_t) * 1000
 
             try:
-                result, err = _process_frame(self.cam, frame, self.cfg, frame_id=idx)
+                result, err = _process_frame(
+                    self.cam,
+                    frame,
+                    self.cfg,
+                    frame_id=idx,
+                    trigger_ts_utc=triggered_at,
+                )
                 if err:
                     last_err = err
                     continue

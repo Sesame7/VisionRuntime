@@ -6,8 +6,8 @@ import socketserver
 
 
 def _format_ts() -> str:
-    ts = datetime.datetime.now()
-    return f"{ts:%Y-%m-%d %H:%M:%S}.{ts.microsecond // 1000:03d}"
+    ts = datetime.datetime.now(datetime.timezone.utc)
+    return f"{ts:%Y-%m-%d %H:%M:%S}.{ts.microsecond // 1000:03d}Z"
 
 
 def _preview_bytes(data: bytes, max_preview: int) -> tuple[bytes, bool]:

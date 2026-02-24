@@ -180,26 +180,25 @@ class ResultStore:
 
 
 def _fmt_date_time(dt: Optional[datetime]) -> Tuple[str, str]:
-    ref = dt or datetime.now(timezone.utc)
-    return ref.date().isoformat(), ref.strftime("%H:%M:%S.%f")[:-3]
+    ref = _to_utc(dt)
+    return ref.date().isoformat(), ref.strftime("%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _fmt_time(dt: Optional[datetime]) -> str:
+    ref = _to_utc(dt)
+    return ref.strftime("%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _to_utc(dt: Optional[datetime]) -> datetime:
     ref = dt or datetime.now(timezone.utc)
-    return ref.strftime("%H:%M:%S.%f")[:-3]
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    return ref.astimezone(timezone.utc)
 
 
 def _record_date_key(rec: OutputRecord) -> str:
-    ref = (
-        rec.captured_at
-        or rec.detected_at
-        or rec.triggered_at
-        or datetime.now(timezone.utc)
-    )
-    if ref.tzinfo is None:
-        ref = ref.replace(tzinfo=timezone.utc)
-    local_ref = ref.astimezone()
-    return local_ref.date().isoformat()
+    ref = rec.triggered_at or rec.captured_at or rec.detected_at
+    return _to_utc(ref).date().isoformat()
 
 
 class OutputManager:

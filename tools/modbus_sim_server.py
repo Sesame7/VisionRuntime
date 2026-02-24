@@ -4,6 +4,7 @@
 import argparse
 import asyncio
 import logging
+import time
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from threading import Lock
@@ -272,9 +273,10 @@ def main():
         "error": logging.ERROR,
         "critical": logging.CRITICAL,
     }
+    logging.Formatter.converter = time.gmtime
     logging.basicConfig(
         level=level_map.get(args.log_level, logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(message)s",
+        format="%(asctime)sZ [%(levelname)s] %(message)s",
     )
     try:
         asyncio.run(_run_server(args))
