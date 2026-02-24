@@ -19,7 +19,7 @@
 ### 3.1 TriggerEvent
 
 - `trigger_seq: int`: global trigger sequence number, monotonically increasing.
-- `source: str`: trigger source (e.g. `"tcp"` / `"http"` / `"modbus"` / `"gpio"`).
+- `source: str`: trigger source identifier (runtime-defined string, case-sensitive; current implementation uses values such as `"TCP"` / `"WEB"` / `"MODBUS"` / `"TEST"`).
 - `triggered_at: datetime | None`: trigger occurrence time, UTC, millisecond precision (may be None at creation).
 - `monotonic_ms: int`: monotonic milliseconds for debouncing and ordering.
 - `payload: Any | None`: sanitized/clipped business summary carried by the source.

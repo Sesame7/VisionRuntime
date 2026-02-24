@@ -14,7 +14,7 @@
 ## 3. Queues and Backpressure
 
 - Main runtime queues:
-  - Trigger queue (`TriggerGateway` → `CameraWorker`), bounded (current default capacity `1`, internal runtime parameter); on overflow, drop the oldest trigger and synthesize an ERROR result.
+  - Trigger queue (`TriggerGateway` → `CameraWorker`), bounded (current default capacity `2`, internal runtime parameter); on overflow, drop the oldest trigger and synthesize an ERROR result.
   - Camera → Detect queue (`DetectQueueManager`), bounded DropHead; on overflow, drop the oldest detect task and synthesize an ERROR result.
 - Detect → Output has no queue; once detection finishes, it fans out directly.
 - DropHead synthesized result: for a dropped frame, generate an OutputRecord with `result="ERROR"` and `message` prefixed with `"Error: queue overflow"`; keep `captured_at` from the original result and set `detected_at` to the current time to distinguish counting.

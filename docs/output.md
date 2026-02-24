@@ -21,7 +21,7 @@
   - Web layout: left side is the overlay preview occupying most of the area; right side shows runtime time, manual trigger, counters (OK/NG/ERROR/TOTAL, where NG does not include ERROR), history table, and a runtime online indicator.
   - Display logic: when there is no recent result, summary areas show an explicit empty state (e.g., “Idle”). When `result=ERROR` or `TIMEOUT`, `/preview/latest` returns a red SVG placeholder for on-site visibility.
   - Empty-state API: `/preview/latest` returns 404 when no preview exists.
-- Modbus: `ModbusOutput` maps OutputRecord to result codes/bits, and `ModbusIO` performs register writes only. Write 1x Discrete Inputs (OK/NG/ERR + toggles) and 3x Input Registers (timestamps/seq/codes). For PLC it only distinguishes OK/NG; Timeout/Error also map to NG (business NG and ERROR are unified as an NG signal; naming still uses NG/ERROR prefixes for upper-layer display). When emitting a result, update IR → DI bits → toggle result.
+- Modbus: `ModbusOutput` maps OutputRecord to result codes/bits, and `ModbusIO` performs register writes only. It updates Discrete Inputs (DI / function-code-2 area: OK/NG/ERR + toggles) and Input Registers (IR / function-code-4 area: timestamps/seq/codes). For PLC it only distinguishes OK/NG; Timeout/Error also map to NG (business NG and ERROR are unified as an NG signal; naming still uses NG/ERROR prefixes for upper-layer display). When emitting a result, update IR → DI bits → toggle result.
 - CSV: asynchronously write result summaries in a background writer thread (no explicit rate limit in current implementation).
 
 ## 4. Integration Order

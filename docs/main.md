@@ -17,7 +17,7 @@
 ├─output/            # manager.py, channel implementations, web assets
 ├─trigger/           # base.py, gateway.py, trigger source implementations
 ├─tools/             # optional, scripts/helpers
-├─data/              # camera image dumping (only written by camera module)
+├─data/              # runtime outputs (e.g., camera images and records.csv under default save_dir)
 ├─logs/              # optional debug/output logs; may be absent or empty in production
 ├─main.py            # entrypoint: load config and start SystemRuntime
 └─docs/              # design docs (optional)
@@ -32,15 +32,15 @@
 
 ## 4. Data and Logs
 
-- Image dumping: when `camera.save_images` is enabled, images are written under `<runtime.save_dir>/images` (extension controlled by camera config). Only the Camera acquisition path may optionally save raw images; other modules do not write images.
-- Log/result files: production runtime prints to terminal only; during debugging, if file dumping is needed, only the Output module may write (logs/CSV, etc.) to `logs/` or a channel-specific path according to channel strategy. Camera SDK auto-generated directories such as `DrvLog`/`System`/`SystemLog` are out of scope of this design.
+- Image dumping: when `camera.save_images` is enabled, images are written under `<runtime.save_dir>/images` (extension controlled by camera config). Only the Camera acquisition path may optionally save raw images; other modules do not write image files.
+- Log/result files: production runtime prints to terminal only; during debugging or production result archiving, Output may write result summaries (for example `<runtime.save_dir>/records.csv`) and optional channel-specific logs. Camera SDK auto-generated directories such as `DrvLog`/`System`/`SystemLog` are out of scope of this design.
 
 ## 5. Module Responsibility Anchors
 
 - `core/`: threads and async runtime, system status and queues; see `runtime.md`.
 - `camera/`: acquisition and saving implementation; config entrypoints are in `config.md`.
 - `detect/`: detection plugins and preview generation; config entrypoints are in `config.md` plus per-plugin self-validation.
-- `output/`: fan-out and channel implementations; the only module allowed to write debug log files.
+- `output/`: fan-out and channel implementations; the only module allowed to write result-summary/debug files.
 - `trigger/`: trigger sources and filtering.
 
 ## 6. Plugin Pattern Conventions
