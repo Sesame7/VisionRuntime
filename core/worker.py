@@ -201,6 +201,13 @@ class DetectQueueManager:
                 # Mark dropped task as done to keep queue counters consistent.
                 with contextlib.suppress(Exception):
                     self.queue.task_done()
+            try:
+                self.queue.put_nowait(task)
+                return
+            except queue.Full:
+                # A concurrent producer/consumer race can still leave the queue full.
+                L.warning("Queue still full, dropping incoming frame %s", task.frame_id)
+                _record_drop(task, remark="queue_overflow_incoming")
 
     def clear(self):
         while True:

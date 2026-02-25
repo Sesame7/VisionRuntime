@@ -42,33 +42,46 @@
   - `http`: `host`, `port`
   - `tcp`: `host`, `port`
   - `modbus`: `host`, `port`, `coil_offset`, `di_offset`, `ir_offset`, `heartbeat_ms`
+    - Units/effective constraints: `heartbeat_ms` is milliseconds (startup validation requires `>0`, and `ModbusIO` further clamps to `>=100`); offsets require `>=0` at startup (and are also clamped to `>=0` in `ModbusIO`).
 - `runtime`
   - `save_dir`: base directory for runtime outputs (images/CSV).
-  - `max_runtime_s`: auto-stop after N seconds (0 = unlimited).
-  - `history_size`: number of recent records kept in memory for HMI.
-  - `max_pending_triggers`: Camera→Detect queue capacity (detect task backlog).
+  - `max_runtime_s`: auto-stop after N seconds (unit: seconds; `0` = unlimited; startup validation requires `>=0`).
+  - `history_size`: number of recent records kept in memory for HMI (startup validation requires `>0`).
+  - `max_pending_triggers`: Camera→Detect queue capacity (detect task backlog; startup validation requires `>0`).
   - Trigger-event queue capacity is currently an internal runtime parameter (default `2`) and is not exposed in the YAML config.
-  - `debounce_ms`: trigger debounce window.
-  - `log_level`: global log level.
+  - `debounce_ms`: trigger debounce window (unit: ms; startup validation requires `>=0`).
+  - `log_level`: global log level (unknown values fall back to `info`).
+  - `opencv_num_threads`: optional OpenCV thread count override (`>0` applies override; `<=0` keeps OpenCV default behavior).
 - `imports`
   - A top-level list; each element is a string Python import path (e.g. `"camera.opt"`, `"output.modbus"`).
   - Purpose: preload optional registries / side-effect registrations; import failures cause startup failure (error should include the specific path and exception text). Empty list is allowed.
 - `camera`
   - `type`: adapter registry name.
   - `device_index`, `grab_timeout_ms`, `max_retry_per_frame`, `output_pixel_format` (bgr8/mono8).
+    - Units/effective constraints: `grab_timeout_ms` is milliseconds (startup validation requires `>0`; adapter/SDK semantics still apply). `max_retry_per_frame` requires `>0` at startup.
   - `save_images`, `ext` (naming/rules are described in the camera document; config only contains switches and paths).
+    - `ext` is normalized at startup: empty -> `.bmp`; missing leading dot is auto-added.
+    - `output_pixel_format` is normalized to lowercase; empty -> `bgr8`.
+  - Generic capture/adapter parameters: `width`, `height`.
+    - Effective behavior: adapter-specific. For `raspi`, width/height override is applied only when both are non-zero; otherwise adapter defaults are used.
+  - Camera-control related fields (primarily used by adapters that support runtime control, e.g. `raspi`): `ae_enable`, `awb_enable`, `exposure_us`, `analogue_gain`, `frame_duration_us`, `settle_ms`, `use_still`.
+    - Units/effective constraints (raspi): `exposure_us` / `frame_duration_us` are microseconds and only applied when `>0`; `analogue_gain` only applied when `>0`; `settle_ms` is milliseconds and is clamped to `>=0`.
   - `image_dir`, `order`, `end_mode` (mock camera only; see camera doc).
+    - Mock-camera constraints: `image_dir` is required; `order` / `end_mode` are validated against fixed enumerations in `camera.mock`.
 - `trigger`
   - Global filters: `global_min_interval_ms`, `high_priority_cooldown_ms`, `high_priority_sources`/`low_priority_sources`, `ip_whitelist`.
+    - Units/effective constraints: interval/cooldown are milliseconds and are clamped to `>=0` inside `TriggerGateway`; empty `ip_whitelist` disables allowlist enforcement.
   - Source names used by `high_priority_sources` / `low_priority_sources` are case-sensitive runtime identifiers (current implementation uses `"TCP"`, `"WEB"`, `"MODBUS"`, etc.).
   - Source enablement and required params are grouped by source:
-    - `trigger.tcp`: `enabled`, `word`
-    - `trigger.modbus`: `enabled`, `poll_ms`
+    - `trigger.tcp`: `enabled`, `word` (`word` is UTF-8 encoded at startup; non-string values are stringified before encoding)
+    - `trigger.modbus`: `enabled`, `poll_ms` (`poll_ms` unit: ms; startup validation requires `>0`, and `ModbusTrigger` clamps to `>=5`)
 - `detect`
   - `impl`: detection plugin registry name.
   - `config_file`: points to `detect_*.yaml`, validate existence at startup.
-  - `timeout_ms`: per-frame detection timeout.
+  - `timeout_ms`: per-frame detection timeout (unit: ms).
+    - Effective behavior: `0` disables timeout classification in the worker. Startup validation requires `>=0`.
   - Preview control: `enable_preview`, `generate_overlay`.
+    - Effective behavior: detector overlay generation is enabled only when both flags are true in the runtime startup path.
 - `output`
   - Output enable switches live here (e.g., `enable_http`, `enable_modbus`, `write_csv`).
   - Modbus IO: address/offset settings live under `comm.modbus`.
@@ -76,7 +89,7 @@
 ## 7. Effective Changes and Operations Notes
 
 - Change application: restart required.  
-- Error observability: on main/detect config load failure, provide clear errors (missing, duplicate main files, unknown fields). Range checks are enforced at startup in `main.py`.  
+- Error observability: on main/detect config load failure, provide clear errors (missing, duplicate main files, unknown fields). Main startup performs unified validation for key numeric fields across `runtime/camera/trigger/comm/detect`; some module-specific constraints still use additional clamping/validation inside runtime modules/adapters.  
 - Examples and docs: add comments in `config/example_main_*.yaml` and demo detect configs; field meaning and default values should match the Loader’s fields.
 
 ## 8. Alignment with Other Modules

@@ -7,7 +7,7 @@ import time
 
 import cv2
 
-from camera import CameraConfig, create_camera, ensure_dir
+from camera import build_camera_config, create_camera, ensure_dir
 from core.config import ConfigError, load_config
 from detect import create_detector
 from core.runtime import build_runtime
@@ -67,7 +67,7 @@ def main():
         setup_logging(args.verbose, getattr(cfg.runtime, "log_level", "info"))
 
     try:
-        _validate_runtime(cfg)
+        _validate_config(cfg)
         enable_preview = bool(getattr(cfg.detect, "enable_preview", True))
         output_pixel_format = _normalize_pixel_format(
             getattr(cfg.camera, "output_pixel_format", "bgr8")
@@ -109,29 +109,12 @@ def main():
     image_root = os.path.join(cfg.runtime.save_dir, "images")
     if cfg.camera.save_images:
         ensure_dir(image_root)
-    if cfg.output.write_csv and not cfg.camera.save_images:
-        ensure_dir(cfg.runtime.save_dir)
 
-    cam_cfg = CameraConfig(
+    cam_cfg = build_camera_config(
+        cfg.camera,
         save_dir=image_root,
         ext=_normalize_ext(cfg.camera.ext),
-        device_index=cfg.camera.device_index,
-        timeout_ms=cfg.camera.grab_timeout_ms,
-        max_retry_per_frame=cfg.camera.max_retry_per_frame,
-        save_images=cfg.camera.save_images,
         output_pixel_format=output_pixel_format,
-        width=cfg.camera.width,
-        height=cfg.camera.height,
-        ae_enable=cfg.camera.ae_enable,
-        awb_enable=cfg.camera.awb_enable,
-        exposure_us=cfg.camera.exposure_us,
-        analogue_gain=cfg.camera.analogue_gain,
-        frame_duration_us=cfg.camera.frame_duration_us,
-        settle_ms=cfg.camera.settle_ms,
-        use_still=cfg.camera.use_still,
-        image_dir=cfg.camera.image_dir,
-        order=cfg.camera.order,
-        end_mode=cfg.camera.end_mode,
     )
     trigger_cfg = TriggerConfig(
         host=cfg.comm.tcp.host,
@@ -244,15 +227,84 @@ def _ensure_bytes(word) -> bytes:
     return str(word).encode("utf-8")
 
 
+def _validate_config(cfg):
+    # runtime
+    _require_int("runtime.max_pending_triggers", cfg.runtime.max_pending_triggers, min_v=1)
+    _require_int("runtime.history_size", cfg.runtime.history_size, min_v=1)
+    _require_float("runtime.debounce_ms", cfg.runtime.debounce_ms, min_v=0.0)
+    _require_float("runtime.max_runtime_s", cfg.runtime.max_runtime_s, min_v=0.0)
+    _require_int("runtime.opencv_num_threads", cfg.runtime.opencv_num_threads, min_v=0)
+
+    # camera
+    _require_int("camera.device_index", cfg.camera.device_index, min_v=0)
+    _require_int("camera.grab_timeout_ms", cfg.camera.grab_timeout_ms, min_v=1)
+    _require_int("camera.max_retry_per_frame", cfg.camera.max_retry_per_frame, min_v=1)
+    _require_int("camera.width", cfg.camera.width, min_v=0)
+    _require_int("camera.height", cfg.camera.height, min_v=0)
+    _require_int("camera.exposure_us", cfg.camera.exposure_us, min_v=0)
+    _require_float("camera.analogue_gain", cfg.camera.analogue_gain, min_v=0.0)
+    _require_int("camera.frame_duration_us", cfg.camera.frame_duration_us, min_v=0)
+    _require_int("camera.settle_ms", cfg.camera.settle_ms, min_v=0)
+
+    # trigger
+    _require_float(
+        "trigger.global_min_interval_ms", cfg.trigger.global_min_interval_ms, min_v=0.0
+    )
+    _require_float(
+        "trigger.high_priority_cooldown_ms",
+        cfg.trigger.high_priority_cooldown_ms,
+        min_v=0.0,
+    )
+    _require_int("trigger.modbus.poll_ms", cfg.trigger.modbus.poll_ms, min_v=1)
+
+    # comm
+    _require_port("comm.http.port", cfg.comm.http.port)
+    _require_port("comm.tcp.port", cfg.comm.tcp.port)
+    _require_port("comm.modbus.port", cfg.comm.modbus.port)
+    _require_int("comm.modbus.coil_offset", cfg.comm.modbus.coil_offset, min_v=0)
+    _require_int("comm.modbus.di_offset", cfg.comm.modbus.di_offset, min_v=0)
+    _require_int("comm.modbus.ir_offset", cfg.comm.modbus.ir_offset, min_v=0)
+    _require_int("comm.modbus.heartbeat_ms", cfg.comm.modbus.heartbeat_ms, min_v=1)
+
+    # detect
+    _require_int("detect.timeout_ms", cfg.detect.timeout_ms, min_v=0)
+
+
 def _validate_runtime(cfg):
-    if cfg.runtime.max_pending_triggers <= 0:
-        raise ConfigError("runtime.max_pending_triggers must be > 0")
-    if cfg.runtime.history_size <= 0:
-        raise ConfigError("runtime.history_size must be > 0")
-    if cfg.runtime.debounce_ms < 0:
-        raise ConfigError("runtime.debounce_ms must be >= 0")
-    if cfg.runtime.max_runtime_s < 0:
-        raise ConfigError("runtime.max_runtime_s must be >= 0")
+    """Backward-compatible alias for older tests/callers."""
+    _validate_config(cfg)
+
+
+def _require_int(name: str, value, *, min_v: int | None = None, max_v: int | None = None):
+    try:
+        iv = int(value)
+    except Exception as e:
+        raise ConfigError(f"{name} must be an integer") from e
+    if min_v is not None and iv < min_v:
+        op = ">=" if min_v != 1 else ">"
+        threshold = min_v if min_v != 1 else 0
+        raise ConfigError(f"{name} must be {op} {threshold}")
+    if max_v is not None and iv > max_v:
+        raise ConfigError(f"{name} must be <= {max_v}")
+    return iv
+
+
+def _require_float(
+    name: str, value, *, min_v: float | None = None, max_v: float | None = None
+):
+    try:
+        fv = float(value)
+    except Exception as e:
+        raise ConfigError(f"{name} must be a number") from e
+    if min_v is not None and fv < min_v:
+        raise ConfigError(f"{name} must be >= {min_v:g}")
+    if max_v is not None and fv > max_v:
+        raise ConfigError(f"{name} must be <= {max_v:g}")
+    return fv
+
+
+def _require_port(name: str, value):
+    _require_int(name, value, min_v=1, max_v=65535)
 
 
 if __name__ == "__main__":

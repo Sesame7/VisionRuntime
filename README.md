@@ -81,11 +81,11 @@ See `docs/deploy.md` for a Linux/Ubuntu deployment guide and systemd unit exampl
 
 ## Configuration
 
-Main config must be exactly one file: `config/main_*.yaml`. Detect config is referenced by `detect.config_file`.
+Main config must be exactly one file: `config/main_*.yaml` or `config/main_*.yml`. Detect config is referenced by `detect.config_file`.
 
 Core sections:
 
-- `runtime`: save_dir, history_size, debounce, log level
+- `runtime`: save_dir, max_runtime_s, history_size, max_pending_triggers, debounce_ms, log_level, opencv_num_threads
 - `camera`: driver, exposure, image save options
 - `trigger`: TCP/Modbus settings and filters
 - `comm`: TCP/Modbus/HTTP ports
@@ -132,6 +132,11 @@ camera:
 
 - Images: `<runtime.save_dir>/images` when `camera.save_images` is true (default)
 - CSV: `<runtime.save_dir>/images/YYYY-MM-DD/records.csv` when `output.write_csv` is true
+
+## Optional Tools
+
+- Backup Streamlit HMI: `tools/streamlit_hmi.py`
+- Optional deps: `pip install -r requirements-tools-streamlit.txt`
 
 ## Contributing
 

@@ -38,6 +38,40 @@ class CameraConfig:
     end_mode: str = "loop"
 
 
+def build_camera_config(
+    cfg_block,
+    *,
+    save_dir: str,
+    ext: str | None = None,
+    output_pixel_format: str | None = None,
+) -> CameraConfig:
+    return CameraConfig(
+        save_dir=save_dir,
+        ext=str(ext if ext is not None else getattr(cfg_block, "ext", ".bmp")),
+        device_index=int(getattr(cfg_block, "device_index", 0)),
+        timeout_ms=int(getattr(cfg_block, "grab_timeout_ms", 2000)),
+        max_retry_per_frame=int(getattr(cfg_block, "max_retry_per_frame", 3)),
+        save_images=bool(getattr(cfg_block, "save_images", True)),
+        output_pixel_format=str(
+            output_pixel_format
+            if output_pixel_format is not None
+            else getattr(cfg_block, "output_pixel_format", "bgr8")
+        ),
+        width=int(getattr(cfg_block, "width", 0)),
+        height=int(getattr(cfg_block, "height", 0)),
+        ae_enable=bool(getattr(cfg_block, "ae_enable", True)),
+        awb_enable=bool(getattr(cfg_block, "awb_enable", True)),
+        exposure_us=int(getattr(cfg_block, "exposure_us", 0)),
+        analogue_gain=float(getattr(cfg_block, "analogue_gain", 0.0)),
+        frame_duration_us=int(getattr(cfg_block, "frame_duration_us", 0)),
+        settle_ms=int(getattr(cfg_block, "settle_ms", 200)),
+        use_still=bool(getattr(cfg_block, "use_still", True)),
+        image_dir=str(getattr(cfg_block, "image_dir", "")),
+        order=str(getattr(cfg_block, "order", "name_asc")),
+        end_mode=str(getattr(cfg_block, "end_mode", "loop")),
+    )
+
+
 class BaseCamera(ABC):
     def __init__(self, cfg: CameraConfig):
         self.cfg = cfg
@@ -88,6 +122,7 @@ def ensure_dir(path: str):
 __all__ = [
     "CameraConfig",
     "CaptureResult",
+    "build_camera_config",
     "BaseCamera",
     "register_camera",
     "create_camera",

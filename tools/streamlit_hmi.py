@@ -1,5 +1,6 @@
 import time
 from io import BytesIO
+from pathlib import Path
 
 import requests
 import streamlit as st
@@ -7,7 +8,8 @@ from streamlit_autorefresh import st_autorefresh
 
 REFRESH_S = 1.0
 REQUEST_TIMEOUT_S = 0.8
-LOGO_PATH = "output/web/logo.svg"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+LOGO_PATH = REPO_ROOT / "output" / "web" / "logo.svg"
 HEARTBEAT_STALE_POLLS = 3
 
 st.set_page_config(
