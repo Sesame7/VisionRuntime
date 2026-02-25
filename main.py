@@ -229,7 +229,9 @@ def _ensure_bytes(word) -> bytes:
 
 def _validate_config(cfg):
     # runtime
-    _require_int("runtime.max_pending_triggers", cfg.runtime.max_pending_triggers, min_v=1)
+    _require_int(
+        "runtime.max_pending_triggers", cfg.runtime.max_pending_triggers, min_v=1
+    )
     _require_int("runtime.history_size", cfg.runtime.history_size, min_v=1)
     _require_float("runtime.debounce_ms", cfg.runtime.debounce_ms, min_v=0.0)
     _require_float("runtime.max_runtime_s", cfg.runtime.max_runtime_s, min_v=0.0)
@@ -275,7 +277,9 @@ def _validate_runtime(cfg):
     _validate_config(cfg)
 
 
-def _require_int(name: str, value, *, min_v: int | None = None, max_v: int | None = None):
+def _require_int(
+    name: str, value, *, min_v: int | None = None, max_v: int | None = None
+):
     try:
         iv = int(value)
     except Exception as e:
