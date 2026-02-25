@@ -97,7 +97,7 @@ class TestMinimalFlow(unittest.TestCase):
                 debounce_ms=cfg.trigger.debounce_ms,
                 enable_http=cfg.output.hmi.enabled,
                 detect_queue_capacity=5,
-                enable_modbus=cfg.output.modbus.enabled,
+                modbus_mode="output" if cfg.output.modbus.enabled else "off",
                 write_csv=cfg.output.write_csv,
                 detect_timeout_ms=cfg.detect.timeout_ms,
                 preview_enabled=cfg.detect.preview_enabled,

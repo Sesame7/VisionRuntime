@@ -42,8 +42,8 @@ class RuntimeBuildConfig:
     http_port: int = 8080
     enable_http: bool = True
     detect_queue_capacity: int = 50
-    enable_modbus: bool = False
-    enable_modbus_io: bool | None = None
+    # "off" | "trigger" | "output" | "both"
+    modbus_mode: str = "off"
     modbus_host: str = "0.0.0.0"
     modbus_port: int = 5020
     coil_offset: int = 800
@@ -58,7 +58,14 @@ class RuntimeBuildConfig:
 def build_runtime_config_from_loaded_config(cfg) -> RuntimeBuildConfig:
     modbus_trigger_enabled = bool(cfg.trigger.modbus.enabled)
     modbus_output_enabled = bool(cfg.output.modbus.enabled)
-    modbus_io_needed = bool(modbus_output_enabled or modbus_trigger_enabled)
+    if modbus_trigger_enabled and modbus_output_enabled:
+        modbus_mode = "both"
+    elif modbus_output_enabled:
+        modbus_mode = "output"
+    elif modbus_trigger_enabled:
+        modbus_mode = "trigger"
+    else:
+        modbus_mode = "off"
     return RuntimeBuildConfig(
         save_dir=cfg.runtime.save_dir,
         history_size=cfg.output.hmi.history_size,
@@ -67,8 +74,7 @@ def build_runtime_config_from_loaded_config(cfg) -> RuntimeBuildConfig:
         http_port=cfg.comm.http.port,
         enable_http=cfg.output.hmi.enabled,
         detect_queue_capacity=cfg.runtime.detect_queue_capacity,
-        enable_modbus=modbus_output_enabled,
-        enable_modbus_io=modbus_io_needed,
+        modbus_mode=modbus_mode,
         modbus_host=cfg.comm.modbus.host,
         modbus_port=cfg.comm.modbus.port,
         coil_offset=cfg.comm.modbus.coil_offset,
@@ -358,6 +364,13 @@ def build_runtime(
 
     loop_runner = loop_runner or LoopRunner()
     cfg = config
+    modbus_mode = str(getattr(cfg, "modbus_mode", "off") or "off").strip().lower()
+    if modbus_mode not in {"off", "trigger", "output", "both"}:
+        raise ValueError(
+            "config.modbus_mode must be one of: off, trigger, output, both"
+        )
+    modbus_io_enabled = modbus_mode in {"trigger", "output", "both"}
+    modbus_output_enabled = modbus_mode in {"output", "both"}
     # Trigger events are intentionally kept lightly buffered by default (2-slot queue).
     trigger_queue_capacity = DEFAULT_TRIGGER_QUEUE_CAPACITY
     detect_queue_capacity = max(1, int(cfg.detect_queue_capacity))
@@ -426,9 +439,6 @@ def build_runtime(
             loop_runner=loop_runner,
         )
         output_mgr.add_channel(hmi_output)
-    modbus_io_enabled = bool(
-        cfg.enable_modbus if cfg.enable_modbus_io is None else cfg.enable_modbus_io
-    )
     if modbus_io_enabled:
         from core.modbus_io import ModbusIO
 
@@ -442,7 +452,7 @@ def build_runtime(
             task_reg=output_mgr.adopt_task,
             loop_runner=loop_runner,
         )
-    if cfg.enable_modbus and modbus_io:
+    if modbus_output_enabled and modbus_io:
         from output.modbus import ModbusOutput
 
         modbus_output = ModbusOutput(modbus_io)
