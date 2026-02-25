@@ -207,23 +207,22 @@ class _HeightStageCfg:
 
 @dataclass
 class _BandStageCfg:
-    y0: int
-    y1: int
-    half_width: int
-    h_low: int
-    h_high: int
-    smooth_half_win: int
-    s_thr: int
-    min_width: int
-    max_width: int
-    use_median: bool
+    y_from_junction_top_px: int
+    y_from_junction_bottom_px: int
+    x_half_width_px: int
+    hue_low: int
+    hue_high: int
+    saturation_smooth_half_window_cols: int
+    saturation_threshold: int
+    width_min_px: int
+    width_max_px: int
     kernel_size: int
 
 
 @dataclass
 class _OffsetStageCfg:
-    base: float
-    tol: float
+    reference_edge_shift_px: float
+    tolerance_px: float
 
 
 @dataclass
@@ -365,8 +364,8 @@ class WeigaoTrayDetector:
                 _WhiteRowCfg(
                     s_max=s_max,
                     v_min=v_min,
-                    lower=np.array([0, 0, 0], dtype=np.uint8),
-                    upper=np.array([179, 255, 255], dtype=np.uint8),
+                    lower=np.array([0, 0, _clamp_u8(v_min)], dtype=np.uint8),
+                    upper=np.array([179, _clamp_u8(s_max), 255], dtype=np.uint8),
                 )
             )
         self.white_cfg = _WhiteCfg(by_row=white_rows)
@@ -392,28 +391,35 @@ class WeigaoTrayDetector:
         )
 
         band = p.get("band") or {}
-        band_smooth_half_win = int(band.get("smooth_half_win", 2))
+        band_search_region = band.get("search_region") or {}
+        band_y_from_junction = band_search_region.get("y_from_junction_px") or {}
+        band_x_window = band_search_region.get("x_window") or {}
+        band_color = band.get("color") or {}
+        band_hue_range = band_color.get("hue_range") or {}
+        band_saturation = band_color.get("saturation") or {}
+        band_width_px = band.get("width_px") or {}
+
+        band_smooth_half_win = int(band_saturation.get("smooth_half_window_cols", 2))
         band_kernel_size = 0
         if band_smooth_half_win > 0:
             band_kernel_size = int(2 * band_smooth_half_win + 1)
         self.band_cfg = _BandStageCfg(
-            y0=int(band.get("y0", 3)),
-            y1=int(band.get("y1", 30)),
-            half_width=int(band.get("half_width", 30)),
-            h_low=int(band.get("H_low", 0)),
-            h_high=int(band.get("H_high", 179)),
-            smooth_half_win=band_smooth_half_win,
-            s_thr=int(band.get("S_thr", 30)),
-            min_width=int(band.get("min_width", 10)),
-            max_width=int(band.get("max_width", 0)),
-            use_median=bool(band.get("use_median", True)),
+            y_from_junction_top_px=int(band_y_from_junction.get("top", 3)),
+            y_from_junction_bottom_px=int(band_y_from_junction.get("bottom", 30)),
+            x_half_width_px=int(band_x_window.get("half_width_px", 30)),
+            hue_low=int(band_hue_range.get("low", 0)),
+            hue_high=int(band_hue_range.get("high", 179)),
+            saturation_smooth_half_window_cols=band_smooth_half_win,
+            saturation_threshold=int(band_saturation.get("threshold", 30)),
+            width_min_px=int(band_width_px.get("min", 10)),
+            width_max_px=int(band_width_px.get("max", 0)),
             kernel_size=band_kernel_size,
         )
 
         offset = p.get("offset") or {}
         self.offset_cfg = _OffsetStageCfg(
-            base=float(offset.get("offset_base", 3)),
-            tol=float(offset.get("offset_tol", 11)),
+            reference_edge_shift_px=float(offset.get("reference_edge_shift_px", 3)),
+            tolerance_px=float(offset.get("tolerance_px", 11)),
         )
 
         overlay = p.get("overlay") or {}
@@ -433,11 +439,6 @@ class WeigaoTrayDetector:
         )
 
         self._validate()
-
-    def _update_white_bounds(self) -> None:
-        for row_cfg in self.white_cfg.by_row:
-            row_cfg.lower[2] = _clamp_u8(row_cfg.v_min)
-            row_cfg.upper[1] = _clamp_u8(row_cfg.s_max)
 
     def _validate(self) -> None:
         grid_cfg = self.grid_cfg
@@ -464,9 +465,8 @@ class WeigaoTrayDetector:
             raise ValueError("junction.bottom_anchor_percentile must be in [0,100]")
         if self.junction_cfg.strip_width_px <= 0:
             raise ValueError("junction.search_region.strips.width_px must be > 0")
-        if self.band_cfg.min_width < 0 or self.band_cfg.max_width < 0:
-            raise ValueError("band.min_width/max_width must be >= 0")
-        self._update_white_bounds()
+        if self.band_cfg.width_min_px < 0 or self.band_cfg.width_max_px < 0:
+            raise ValueError("band.width_px.min/max must be >= 0")
 
     def _keep_largest_component_inplace(self, mask_u8: np.ndarray) -> None:
         num, labels, stats, _ = cv2.connectedComponentsWithStats(
@@ -567,9 +567,20 @@ class WeigaoTrayDetector:
         blended = cv2.addWeighted(roi, 1.0 - float(alpha), color_img, float(alpha), 0.0)
         roi[m] = blended[m]
 
+    def _junction_strip_spans(
+        self, cx_in_roi: float, roi_w: int
+    ) -> Tuple[int, int, int, int]:
+        junction_cfg = self.junction_cfg
+        cx_i = _clamp_int(cx_in_roi, 0, roi_w - 1)
+        d = int(junction_cfg.strip_center_offset_x_px)
+        ws = max(1, int(round(junction_cfg.strip_width_px / 2.0)))
+        lx0, lx1 = _clamp_span_exclusive(cx_i - d - ws, cx_i - d + ws, 0, roi_w)
+        rx0, rx1 = _clamp_span_exclusive(cx_i + d - ws, cx_i + d + ws, 0, roi_w)
+        return lx0, lx1, rx0, rx1
+
     def _collect_slots_until_junction(
         self,
-        img_dn: np.ndarray,
+        img: np.ndarray,
         rois: List[Tuple[int, int, int, int, int, int]],
         overlay: _OverlayRecorder,
         fail_tracker: _FailTracker,
@@ -585,7 +596,7 @@ class WeigaoTrayDetector:
 
         for r, c, x, y, w, h in rois:
             white_row_cfg = white_cfg.by_row[r]
-            roi_bgr = img_dn[y : y + h, x : x + w]
+            roi_bgr = img[y : y + h, x : x + w]
             roi_hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
             core = cv2.inRange(roi_hsv, self.yellow_lower, self.yellow_upper)
             self._keep_largest_component_inplace(core)
@@ -624,11 +635,7 @@ class WeigaoTrayDetector:
                 h - 1,
             )
 
-            cx_i = _clamp_int(cx, 0, w - 1)
-            d = int(junction_cfg.strip_center_offset_x_px)
-            ws = max(1, int(round(junction_cfg.strip_width_px / 2.0)))
-            lx0, lx1 = _clamp_span_exclusive(cx_i - d - ws, cx_i - d + ws, 0, w)
-            rx0, rx1 = _clamp_span_exclusive(cx_i + d - ws, cx_i + d + ws, 0, w)
+            lx0, lx1, rx0, rx1 = self._junction_strip_spans(cx, w)
 
             if dbg_cfg.show_strips:
                 overlay.rect(
@@ -719,11 +726,7 @@ class WeigaoTrayDetector:
                 fail_tracker.consider("JUNCTION_NOT_FOUND", slot.row, slot.col)
                 continue
 
-            cx_roi = _clamp_int(slot.x_center - x, 0, w - 1)
-            d = int(junction_cfg.strip_center_offset_x_px)
-            ws = max(1, int(round(junction_cfg.strip_width_px / 2.0)))
-            lx0, lx1 = _clamp_span_exclusive(cx_roi - d - ws, cx_roi - d + ws, 0, w)
-            rx0, rx1 = _clamp_span_exclusive(cx_roi + d - ws, cx_roi + d + ws, 0, w)
+            lx0, lx1, rx0, rx1 = self._junction_strip_spans(slot.x_center - x, w)
             # Draw only on left/right strips to avoid covering the center feature.
             line_segments = [
                 (x + lx0, max(0, lx1 - lx0 - 1)),
@@ -763,14 +766,14 @@ class WeigaoTrayDetector:
             y1_max = y + h - 1
 
             y0f, y1f = _clamp_span_inclusive(
-                slot.y_junction + band_cfg.y0,
-                slot.y_junction + band_cfg.y1,
+                slot.y_junction + band_cfg.y_from_junction_top_px,
+                slot.y_junction + band_cfg.y_from_junction_bottom_px,
                 y,
                 y1_max,
             )
             xc = _clamp_int(slot.x_center, x, x1_max)
             x0f, x1f = _clamp_span_inclusive(
-                xc - band_cfg.half_width, xc + band_cfg.half_width, x, x1_max
+                xc - band_cfg.x_half_width_px, xc + band_cfg.x_half_width_px, x, x1_max
             )
             band_rect = _rect_from_inclusive(x0f, y0f, x1f, y1f)
 
@@ -787,15 +790,9 @@ class WeigaoTrayDetector:
             roi_hsv = slot.hsv[ly0 : ly1 + 1, lx0 : lx1 + 1]
             Hc = roi_hsv[:, :, 0]
             Sc = roi_hsv[:, :, 1].astype(np.float32)
-            m = _h_in_range(Hc, band_cfg.h_low, band_cfg.h_high)
-            if band_cfg.use_median:
-                s_masked = np.where(m, Sc, np.nan)
-                s_col = np.nanmedian(s_masked, axis=0).astype(np.float32)
-            else:
-                mf = m.astype(np.float32)
-                s_sum = (Sc * mf).sum(axis=0, dtype=np.float32)
-                s_cnt = mf.sum(axis=0, dtype=np.float32)
-                s_col = (s_sum / np.maximum(s_cnt, 1.0)).astype(np.float32)
+            m = _h_in_range(Hc, band_cfg.hue_low, band_cfg.hue_high)
+            s_masked = np.where(m, Sc, np.nan)
+            s_col = np.nanmedian(s_masked, axis=0).astype(np.float32)
             s_col = np.nan_to_num(s_col, nan=0.0)
             if band_cfg.kernel_size > 0 and s_col.size > 1:
                 s_col = cv2.blur(
@@ -804,7 +801,7 @@ class WeigaoTrayDetector:
                     borderType=cv2.BORDER_REPLICATE,
                 ).reshape(-1)
 
-            run = _longest_true_run(s_col >= float(band_cfg.s_thr))
+            run = _longest_true_run(s_col >= float(band_cfg.saturation_threshold))
             if run is None:
                 overlay.rect(band_rect, overlay_cfg.ng_bgr)
                 fail_tracker.consider("BAND_NOT_FOUND", slot.row, slot.col)
@@ -812,8 +809,8 @@ class WeigaoTrayDetector:
 
             L, R = run
             width = int(R - L + 1)
-            if width < int(band_cfg.min_width) or (
-                int(band_cfg.max_width) > 0 and width > int(band_cfg.max_width)
+            if width < int(band_cfg.width_min_px) or (
+                int(band_cfg.width_max_px) > 0 and width > int(band_cfg.width_max_px)
             ):
                 overlay.rect(band_rect, overlay_cfg.ng_bgr)
                 fail_tracker.consider("BAND_NOT_FOUND", slot.row, slot.col)
@@ -833,12 +830,13 @@ class WeigaoTrayDetector:
                 )
 
             t = 0.0 if cols <= 1 else float(slot.col) / float(cols - 1)
-            base_shift = (-float(offset_cfg.base)) + (2.0 * float(offset_cfg.base)) * t
+            edge_shift_px = float(offset_cfg.reference_edge_shift_px)
+            base_shift = (-edge_shift_px) + (2.0 * edge_shift_px) * t
             x_ref = float(slot.x_center) + base_shift
             offset_ok = (
-                (x_ref - float(offset_cfg.tol))
+                (x_ref - float(offset_cfg.tolerance_px))
                 <= x_band
-                <= (x_ref + float(offset_cfg.tol))
+                <= (x_ref + float(offset_cfg.tolerance_px))
             )
 
             overlay.center(
@@ -875,12 +873,11 @@ class WeigaoTrayDetector:
         img_h, img_w = img.shape[:2]
         rois = self._generate_rois(img_w, img_h)
 
-        img_dn = img
-        overlay_img = img_dn.copy() if self.generate_overlay else None
+        overlay_img = img.copy() if self.generate_overlay else None
         overlay = _OverlayRecorder(detector=self, enabled=overlay_img is not None)
         fail_tracker = _FailTracker(detector=self)
         slots_d_ok, junction_by_row = self._collect_slots_until_junction(
-            img_dn, rois, overlay, fail_tracker
+            img, rois, overlay, fail_tracker
         )
         slots_height_ok = self._apply_height_stage(
             slots_d_ok, junction_by_row, overlay, fail_tracker

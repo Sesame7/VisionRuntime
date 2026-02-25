@@ -27,17 +27,14 @@ junction:
     min_rows: { above: 3, below: 3 }
   height: { max_upward_deviation_px: 20 }
 band:
-  y0: 3
-  y1: 30
-  half_width: 30
-  H_low: 0
-  H_high: 179
-  smooth_half_win: 2
-  S_thr: 30
-  min_width: 10
-  max_width: 0
-  use_median: false
-offset: { offset_base: 4, offset_tol: 12 }
+  search_region:
+    y_from_junction_px: { top: 5, bottom: 30 }
+    x_window: { half_width_px: 30 }
+  color:
+    hue_range: { low: 0, high: 179 }
+    saturation: { threshold: 30, smooth_half_window_cols: 2 }
+  width_px: { min: 10, max: 0 }
+offset: { reference_edge_shift_px: 8, tolerance_px: 5 }
 overlay:
   # Colors are BGR integers (OpenCV).
   ok_bgr: [0, 200, 0]
