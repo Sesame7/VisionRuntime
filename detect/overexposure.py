@@ -45,6 +45,7 @@ class OverExposureDetector:
         generate_overlay: bool = True,
         input_pixel_format: str | None = None,
     ):
+        _ = input_pixel_format
         self.threshold = int(params.get("overexp_threshold", 245))
         self.ratio_threshold = float(params.get("overexp_ratio", 0.02))
         self.downscale_factor = float(params.get("downscale_factor", 1.0))

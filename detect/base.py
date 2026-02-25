@@ -43,6 +43,25 @@ def create_detector(
     )
 
 
+def create_detector_from_loaded_config(
+    cfg,
+    *,
+    input_pixel_format: str | None = None,
+) -> Detector:
+    preview_enabled = bool(cfg.detect.preview_enabled)
+    pixel_format = (
+        input_pixel_format
+        if input_pixel_format is not None
+        else str(cfg.camera.capture_output_format)
+    )
+    return create_detector(
+        cfg.detect.impl,
+        cfg.detect_params or {},
+        generate_overlay=preview_enabled,
+        input_pixel_format=pixel_format,
+    )
+
+
 def encode_image_jpeg(
     img: np.ndarray, quality: int = 50, subsampling: int = 2
 ) -> Tuple[bytes, str]:
@@ -69,4 +88,10 @@ def encode_image_jpeg(
     return buf.tobytes(), "image/jpeg"
 
 
-__all__ = ["Detector", "register_detector", "create_detector", "encode_image_jpeg"]
+__all__ = [
+    "Detector",
+    "register_detector",
+    "create_detector",
+    "create_detector_from_loaded_config",
+    "encode_image_jpeg",
+]

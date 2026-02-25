@@ -1,10 +1,9 @@
 # -- coding: utf-8 --
 
 import asyncio
-import contextlib
 import logging
 
-from core import runtime
+from core.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
 from trigger.base import BaseTrigger, TriggerConfig, register_trigger
 
 L = logging.getLogger("vision_runtime.trigger.tcp")
@@ -12,23 +11,40 @@ L = logging.getLogger("vision_runtime.trigger.tcp")
 
 @register_trigger("tcp")
 class TcpTrigger(BaseTrigger):
-    def __init__(self, cfg: TriggerConfig, on_trigger):
+    def __init__(
+        self,
+        cfg: TriggerConfig,
+        on_trigger,
+        *,
+        loop_runner: LoopRunner,
+    ):
         super().__init__(cfg, on_trigger)
         self._server = None
+        self._tasks = AsyncTaskOwner(
+            logger=L,
+            owner_name="tcp_trigger",
+            loop_runner=loop_runner,
+        )
 
     def start(self):
         if self._server:
             return
-        runtime.spawn_background_task(self._serve())
+        self._tasks.spawn(self._serve())
 
     def stop(self):
+        self._tasks.cancel_and_clear_local_tasks()
+
         async def _cleanup():
             if self._server:
                 self._server.close()
                 await self._server.wait_closed()
             self._server = None
 
-        runtime.run_async(_cleanup(), timeout=0.5)
+        run_async_cleanup(
+            _cleanup(),
+            timeout=0.5,
+            loop_runner=self._tasks.loop_runner,
+        )
         L.info("TCP trigger socket stopped")
 
     async def _serve(self):
@@ -51,13 +67,6 @@ class TcpTrigger(BaseTrigger):
             data = await reader.read(32)
             if data and data.strip() == self.cfg.word:
                 self.on_trigger(writer.get_extra_info("peername"))
-        except Exception:
-            L.warning("Trigger client error", exc_info=True)
         finally:
-            with contextlib.suppress(Exception):
-                writer.close()
-                await writer.wait_closed()
-
-    @property
-    def is_running(self) -> bool:
-        return bool(self._server)
+            writer.close()
+            await writer.wait_closed()

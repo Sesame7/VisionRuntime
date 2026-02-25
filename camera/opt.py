@@ -465,11 +465,7 @@ class OptSciCamera(BaseCamera):
                 if result:
                     path, arr, ts = result
                     if path:
-                        try:
-                            rel_path = os.path.relpath(path)
-                        except Exception:
-                            rel_path = path
-                        L.info("[%5s] @ %s", idx, rel_path)
+                        L.info("[%5s] @ %s", idx, path)
                     else:
                         L.info("[%5s] captured (no file save)", idx)
                     return CaptureResult(
@@ -477,7 +473,6 @@ class OptSciCamera(BaseCamera):
                         trigger_seq=idx,
                         source="",
                         device_id=str(self.cfg.device_index),
-                        path=path,
                         image=arr,
                         timings={
                             "grab_ms": grab_ms,
@@ -531,12 +526,11 @@ class OptSciCamera(BaseCamera):
         finally:
             try:
                 SDK.stop_grabbing(self.handle)
-            except Exception:
-                L.warning("stop grabbing failed", exc_info=True)
-            try:
-                SDK.close_device(self.handle)
             finally:
-                SDK.delete_device(self.handle)
+                try:
+                    SDK.close_device(self.handle)
+                finally:
+                    SDK.delete_device(self.handle)
 
 
 __all__ = ["OptSciCamera", "SDK_LOADED_PATH"]

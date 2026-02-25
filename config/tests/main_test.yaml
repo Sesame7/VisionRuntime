@@ -1,22 +1,29 @@
 runtime:
   save_dir: "data/test"
-  history_size: 5
-  debounce_ms: 0
+  detect_queue_capacity: 50
 
 camera:
   type: "mock"
-  save_images: false
-  output_pixel_format: "bgr8"
-  image_dir: "data/test"
-  order: "name_desc"
-  end_mode: "stop"
+  common:
+    save_images: false
+    capture_output_format: "bgr8"
+  mock:
+    image_dir: "data/test"
+    order: "name_desc"
+    end_mode: "stop"
+
+trigger:
+  debounce_ms: 0
 
 detect:
   impl: "overexposure"
   config_file: "../detect_overexposure.yaml"
-  enable_preview: false
+  preview_enabled: false
 
 output:
-  enable_http: false
-  enable_modbus: false
+  hmi:
+    enabled: false
+    history_size: 5
+  modbus:
+    enabled: false
   write_csv: false

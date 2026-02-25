@@ -1,30 +1,31 @@
 runtime:
   save_dir: "data"
   max_runtime_s: 0
-  history_size: 10
-  max_pending_triggers: 10
-  debounce_ms: 10.0
+  detect_queue_capacity: 10
   log_level: "info"
-  opencv_num_threads: 0
 
 camera:
   type: "mock"
-  image_dir: "data/mock_images"
-  device_index: 0
-  grab_timeout_ms: 2000
-  max_retry_per_frame: 3
-  save_images: false
-  ext: ".bmp"
-  output_pixel_format: "bgr8"
-  width: 4056
-  height: 3040
-  ae_enable: false
-  awb_enable: false
-  exposure_us: 100000
-  analogue_gain: 1.0
-  frame_duration_us: 100000
-  settle_ms: 200
-  use_still: true
+  common:
+    save_images: false
+    save_ext: ".bmp"
+    capture_output_format: "bgr8"
+  hik:
+    device_index: 0
+    grab_timeout_ms: 2000
+    max_retry_per_frame: 3
+  mock:
+    image_dir: "data/mock_images"
+  raspi:
+    width: 4056
+    height: 3040
+    ae_enable: false
+    awb_enable: false
+    exposure_us: 100000
+    analogue_gain: 1.0
+    frame_duration_us: 100000
+    settle_ms: 200
+    use_still: true
 
 comm:
   http:
@@ -42,6 +43,7 @@ comm:
     heartbeat_ms: 1000
 
 trigger:
+  debounce_ms: 10.0
   global_min_interval_ms: 0
   high_priority_cooldown_ms: 0
   high_priority_sources: []
@@ -58,10 +60,12 @@ detect:
   impl: "weigao_tray"
   config_file: "detect_weigao_tray.yaml"
   timeout_ms: 2000
-  enable_preview: true
-  generate_overlay: true
+  preview_enabled: true
 
 output:
-  enable_http: true
-  enable_modbus: true
+  hmi:
+    enabled: true
+    history_size: 10
+  modbus:
+    enabled: true
   write_csv: true

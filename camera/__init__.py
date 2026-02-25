@@ -5,6 +5,7 @@ from .base import (
     BaseCamera,
     register_camera,
     create_camera,
+    create_camera_from_loaded_config,
     ensure_dir,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "BaseCamera",
     "register_camera",
     "create_camera",
+    "create_camera_from_loaded_config",
     "ensure_dir",
 ]

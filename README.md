@@ -61,7 +61,7 @@ flowchart LR
 
 ![Web HMI](docs/assets/web-hmi.png)
 
-Live status, last-N records, and the latest preview image. Served at `http://<comm.http.host>:<comm.http.port>` when `output.enable_http` is true (defaults `0.0.0.0:8000`).
+Live status, last-N records, and the latest preview image. Served at `http://<comm.http.host>:<comm.http.port>` when `output.hmi.enabled` is true (defaults `0.0.0.0:8000`).
 
 ## Quick Start
 
@@ -85,12 +85,14 @@ Main config must be exactly one file: `config/main_*.yaml` or `config/main_*.yml
 
 Core sections:
 
-- `runtime`: save_dir, max_runtime_s, history_size, max_pending_triggers, debounce_ms, log_level, opencv_num_threads
+- `runtime`: save_dir, max_runtime_s, detect_queue_capacity, log_level
 - `camera`: driver, exposure, image save options
-- `trigger`: TCP/Modbus settings and filters
+- `trigger`: debounce + TCP/Modbus settings and filters
 - `comm`: TCP/Modbus/HTTP ports
-- `detect`: detector implementation and config file
-- `output`: enable HMI/Modbus/CSV
+- `detect`: detector implementation and config file / preview settings
+- `output`: HMI/Modbus/CSV switches (including `output.hmi.history_size`)
+
+Camera config is split by implementation: use `camera.common` for shared fields and `camera.<type>` for adapter-specific fields (for example `camera.mock`, `camera.raspi`, `camera.opt`).
 
 ### Raspberry Pi camera (Picamera2)
 
@@ -119,7 +121,10 @@ Notes:
 ```yaml
 camera:
   type: "mock"
-  image_dir: "data/mock_images"
+  common:
+    save_images: false
+  mock:
+    image_dir: "data/mock_images"
 ```
 
 For built-in modules, `imports` is usually not required; keep it for custom/external plugins that must be preloaded.

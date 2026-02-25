@@ -7,7 +7,7 @@ import numpy as np
 
 from camera import build_camera_config, create_camera
 from core.config import load_config
-from core.runtime import build_runtime
+from core.runtime import RuntimeBuildConfig, build_runtime
 from core.worker import AcqTask, DetectQueueManager
 from detect import create_detector
 from trigger import TriggerConfig
@@ -79,7 +79,7 @@ class TestMinimalFlow(unittest.TestCase):
 
         cfg = load_config(TEST_CONFIG_DIR)
         cfg.runtime.save_dir = TEST_IMAGE_DIR
-        cfg.runtime.debounce_ms = 0.0
+        cfg.trigger.debounce_ms = 0.0
         cfg.camera.image_dir = TEST_IMAGE_DIR
         camera_cfg = build_camera_config(cfg.camera, save_dir=cfg.runtime.save_dir)
         camera = create_camera(cfg.camera.type, camera_cfg)
@@ -87,33 +87,34 @@ class TestMinimalFlow(unittest.TestCase):
             cfg.detect.impl,
             cfg.detect_params or {},
             generate_overlay=False,
-            input_pixel_format=cfg.camera.output_pixel_format,
+            input_pixel_format=cfg.camera.capture_output_format,
         )
         runtime = build_runtime(
             camera,
-            save_dir=cfg.runtime.save_dir,
-            history_size=cfg.runtime.history_size,
-            debounce_ms=cfg.runtime.debounce_ms,
-            enable_http=cfg.output.enable_http,
-            max_pending_triggers=5,
-            enable_modbus=cfg.output.enable_modbus,
-            write_csv=cfg.output.write_csv,
+            config=RuntimeBuildConfig(
+                save_dir=cfg.runtime.save_dir,
+                history_size=cfg.output.hmi.history_size,
+                debounce_ms=cfg.trigger.debounce_ms,
+                enable_http=cfg.output.hmi.enabled,
+                detect_queue_capacity=5,
+                enable_modbus=cfg.output.modbus.enabled,
+                write_csv=cfg.output.write_csv,
+                detect_timeout_ms=cfg.detect.timeout_ms,
+                preview_enabled=cfg.detect.preview_enabled,
+            ),
             detector=detector,
-            detect_timeout_ms=cfg.detect.timeout_ms,
-            enable_preview=cfg.detect.enable_preview,
             trigger_cfg=TriggerConfig(),
         )
 
-        with camera.session():
-            runtime.start()
-            try:
-                time.sleep(0.05)
-                ok1 = runtime.app_context.trigger_gateway.report_raw_trigger("TEST")
-                ok2 = runtime.app_context.trigger_gateway.report_raw_trigger("TEST")
-                self.assertTrue(ok1 and ok2)
-                records = _wait_for_records(runtime.output_mgr, 2)
-            finally:
-                runtime.stop()
+        runtime.start()
+        try:
+            time.sleep(0.05)
+            ok1 = runtime.app_context.trigger_gateway.report_raw_trigger("TEST")
+            ok2 = runtime.app_context.trigger_gateway.report_raw_trigger("TEST")
+            self.assertTrue(ok1 and ok2)
+            records = _wait_for_records(runtime.output_mgr, 2)
+        finally:
+            runtime.stop()
 
         records = sorted(records, key=lambda r: r.trigger_seq)
         self.assertEqual(records[0].result, "OK")

@@ -28,11 +28,12 @@
 ## 5. Mock Camera (Optional)
 
 - A mock adapter is available; it reads frames from a directory. After registration, switch via config; no changes to the main flow.
-- Suggested config fields for mock (camera block):
-  - `type: "mock"`
-  - `image_dir`: relative to the current working directory (`os.getcwd()`) or an absolute path. Required. In normal usage this is typically the project root because the service is started from the repo directory.
-  - `order`: `name_asc` / `name_desc` / `name_natural` / `mtime_asc` / `mtime_desc` / `random`.
-  - `end_mode`: `loop` / `stop` / `hold`.
+- Suggested config fields for mock (split camera config):
+  - `camera.type: "mock"`
+  - `camera.common`: shared fields such as `capture_output_format`, `save_images`, `save_ext`
+  - `camera.mock.image_dir`: relative to the current working directory (`os.getcwd()`) or an absolute path. Required. In normal usage this is typically the project root because the service is started from the repo directory.
+  - `camera.mock.order`: `name_asc` / `name_desc` / `name_natural` / `mtime_asc` / `mtime_desc` / `random`.
+  - `camera.mock.end_mode`: `loop` / `stop` / `hold`.
 - Constraints: read-only; only current directory (no recursion). Supports common image extensions (`.jpg/.jpeg/.png/.bmp`).
 
 ## 6. Adapter Notes

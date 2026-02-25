@@ -22,7 +22,6 @@ class CaptureResult:
     success: bool = False
     error: str | None = None
     image: Any | None = None  # runtime np.ndarray
-    path: str | None = None
     triggered_at: datetime | None = None
     captured_at: datetime | None = None
     timings: Dict[str, float] | None = None
