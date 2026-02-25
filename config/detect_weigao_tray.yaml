@@ -1,61 +1,31 @@
-denoise:
-  k: 1
-  sigma: 0
 grid:
-  rows: 3
-  cols_per_row:
-  - 17
-  - 17
-  - 17
+  cols_per_row: [17, 17, 17]
   anchor_left:
-  - - 154
-    - 66
-  - - 123
-    - 733
-  - - 104
-    - 1419
+  - { x: 154, y: 66 }
+  - { x: 123, y: 733 }
+  - { x: 104, y: 1419 }
   anchor_right:
-  - - 2740
-    - 66
-  - - 2766
-    - 733
-  - - 2791
-    - 1419
-  roi:
-    w: 150
-    h: 200
+  - { x: 2740, y: 66 }
+  - { x: 2766, y: 733 }
+  - { x: 2791, y: 1419 }
+  roi: { width: 150, height: 200 }
 yellow_hsv:
-  lower:
-  - 10
-  - 140
-  - 30
-  upper:
-  - 50
-  - 255
-  - 255
-morph:
-  open_k: 1
-  close_k: 1
-  erode_k: 1
-  erode_iter: 0
-  keep_largest: true
-rod:
-  vertical_tol_deg: 90.0
-  min_bbox_area: 50
+  lower: [10, 140, 30]
+  upper: [50, 255, 255]
+rod: { min_mask_area: 50 }
 junction:
-  rod_bottom_percentile: 98.0
-  win_up: 60
-  win_down: 40
-  strip_offset_x: 24
-  strip_half_width: 12
-white:
-  S_max: 30
-  V_min: 100
-split:
-  smooth_half_win: 3
-  min_rows_above: 3
-  min_rows_below: 3
-  min_delta_white: 0.2
+  bottom_anchor_percentile: 99
+  search_region:
+    y_window: { up_px: 60, down_px: 40 }
+    strips: { center_offset_x_px: 20, width_px: 28 }
+  white:
+    - { S_max: 30, V_min: 110 }
+    - { S_max: 30, V_min: 100 }
+    - { S_max: 30, V_min: 90 }
+  split:
+    smooth_half_window_rows: 3
+    min_rows: { above: 3, below: 3 }
+  height: { max_upward_deviation_px: 20 }
 band:
   y0: 3
   y1: 30
@@ -67,18 +37,10 @@ band:
   min_width: 10
   max_width: 0
   use_median: false
-offset:
-  offset_base: 4
-  offset_tol: 12
-height:
-  delta_up: 20
+offset: { offset_base: 4, offset_tol: 12 }
 overlay:
   # Colors are BGR integers (OpenCV).
   ok_bgr: [0, 200, 0]
   ng_bgr: [0, 0, 220]
-  line_width: 5
-dbg:
-  show_roi: false
-  show_mask: false
-  show_strips: false
-  show_band: false
+  line_width: 3
+dbg: { show_roi: false, show_mask: false, show_strips: false, show_band: false }
