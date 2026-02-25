@@ -28,7 +28,7 @@
 - Configurations are centralized under `config/`. Recommended main config naming is `main_<PROJECT>_<SITE>.yaml`; runtime loader behavior is “exactly one `main_*.yaml` in the selected config directory”. Detection parameters are carried by `detect_*.yaml`. Field meanings and validations are described in `config.md`.
 - The entrypoint is responsible for: load config → initialize runtime components (`build_runtime`) → create enabled trigger sources → start runtime (workers/output/heartbeat/triggers). Global data contracts are defined by `core/contracts`.
 - Communication endpoints (host/port/offsets) are configured under the `comm` section and referenced by trigger/output enablement.
-- The top-level `imports` list is used to preload plugin modules / side-effect registrations (commonly camera/detect/trigger, and optionally output helpers). Each item is a Python import path. An empty list is allowed; import failure causes startup failure.
+- The top-level `imports` list is an optional preload hook for plugin modules / side-effect registrations (mainly custom extensions). Built-in camera/detect/trigger modules can be lazily imported by factory name, and output channels are wired directly in `build_runtime(...)`. Each item is a Python import path. An empty list is allowed; import failure causes startup failure.
 
 ## 4. Data and Logs
 
@@ -46,14 +46,14 @@
 ## 6. Plugin Pattern Conventions
 
 - Applicable modules: camera / detect / trigger use registry + factory pattern. Output channels are currently wired directly in `build_runtime(...)` (not registry-based).
-- Registration and imports: plugins self-register when the module is imported (e.g., via `register_*` decorators). The main config’s `imports` list is used to populate registries. Import failure or missing registration type → startup failure and list available types.
+- Registration and imports: plugins self-register when the module is imported (e.g., via `register_*` decorators). Registries can be populated either by the optional main-config `imports` preload list or by factory lazy imports of built-in modules. Import failure or missing registration type → startup failure and list available types.
 - Instantiation: instantiate via `create_*` factory based on config; missing required params or type mismatch must raise a clear error.
 - Lifecycle: hot reload is not supported; plugins should not auto-rebuild after close; plugins must not create/close event loops on their own (must reuse `core/runtime` helpers).
 - Config boundary: config only provides type/imports/paths/required params; field definitions are in `config.md`; plugin internal configs must validate themselves.
 
 ## 7. main Module Design Key Points
 
-- Responsibilities: parse required CLI/environment parameters (e.g., optional `--config-dir`, `--log-level`), locate the unique `main_*.yaml`, call Loader to produce the config object, preload module registries according to `imports`.
+- Responsibilities: parse required CLI/environment parameters (e.g., optional `--config-dir`, `--log-level`), locate the unique `main_*.yaml`, call Loader to produce the config object, and optionally preload modules declared in `imports`.
 - Startup sequence (current implementation): load config/imports → build detector/camera/runtime → create enabled trigger sources → `runtime.start(...)` (Camera/Detect Workers → Output channels → heartbeat → triggers) → enter blocking main loop.
 - Shutdown sequence: receive signal/exception → request each module to stop → wait for Workers/channels to close → call `shutdown_loop()` to close the async loop → exit process; stop/join timeouts can reuse runtime defaults.
 - Logging: follow global `log_level`; production prints to terminal only; during debugging, Output may optionally dump file logs (`logs/`).

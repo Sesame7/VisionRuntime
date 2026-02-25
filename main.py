@@ -272,11 +272,6 @@ def _validate_config(cfg):
     _require_int("detect.timeout_ms", cfg.detect.timeout_ms, min_v=0)
 
 
-def _validate_runtime(cfg):
-    """Backward-compatible alias for older tests/callers."""
-    _validate_config(cfg)
-
-
 def _require_int(
     name: str, value, *, min_v: int | None = None, max_v: int | None = None
 ):

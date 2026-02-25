@@ -95,9 +95,6 @@ Core sections:
 ### Raspberry Pi camera (Picamera2)
 
 ```yaml
-imports:
-  - "camera.raspi"
-
 camera:
   type: "raspi"
   width: 4056
@@ -120,13 +117,12 @@ Notes:
 ### Mock camera
 
 ```yaml
-imports:
-  - "camera.mock"
-
 camera:
   type: "mock"
   image_dir: "data/mock_images"
 ```
+
+For built-in modules, `imports` is usually not required; keep it for custom/external plugins that must be preloaded.
 
 ## Outputs
 

@@ -138,7 +138,6 @@ class CameraWorker(BaseWorker):
                         duration_ms=(time.perf_counter() - t0) * 1000,
                         detect_ms=None,
                         timeout_ms=None,
-                        preview=None,
                     )
                     self.result_sink(rec, None)
                     continue
@@ -270,7 +269,6 @@ class DetectWorker(BaseWorker):
                     duration_ms=(time.perf_counter() - task.t0) * 1000,
                     detect_ms=detect_ms,
                     timeout_ms=self.timeout_ms,
-                    preview=None,
                 )
                 preview_bytes = None
                 preview_mime = None
@@ -321,7 +319,6 @@ def _to_output_record(
     duration_ms: float,
     detect_ms: float | None,
     timeout_ms: float | None,
-    preview: bytes | None,
 ) -> OutputRecord:
     msg = str(message or "")
     result = "OK" if ok else "NG"
