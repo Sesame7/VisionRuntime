@@ -2,7 +2,6 @@
 
 import os
 import threading
-import importlib
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from datetime import datetime
 from typing import Dict, Type
 
 from core.contracts import CaptureResult
+from core.registry import register_named, resolve_registered
 
 CameraFactory = Dict[str, Type["BaseCamera"]]
 _registry: CameraFactory = {}
@@ -89,30 +89,17 @@ class BaseCamera(ABC):
 
 
 def register_camera(name: str):
-    def decorator(cls: Type[BaseCamera]):
-        _registry[name] = cls
-        return cls
-
-    return decorator
+    return register_named(_registry, name)
 
 
 def create_camera(name: str, cfg: CameraConfig) -> BaseCamera:
-    if name not in _registry:
-        import_err: Exception | None = None
-        try:
-            importlib.import_module(f"{__package__}.{name}")
-        except Exception as e:
-            import_err = e
-    if name not in _registry:
-        hint = (
-            f" (import failed: {import_err})"
-            if "import_err" in locals() and import_err
-            else ""
-        )
-        raise ValueError(
-            f"Unknown camera type '{name}'. Available: {', '.join(_registry.keys()) or 'none'}{hint}"
-        )
-    return _registry[name](cfg)
+    cls = resolve_registered(
+        _registry,
+        name,
+        package=__package__ or "camera",
+        unknown_label="camera type",
+    )
+    return cls(cfg)
 
 
 def ensure_dir(path: str):

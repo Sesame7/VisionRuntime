@@ -2,8 +2,8 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-import importlib
 from typing import Callable, Dict, Type
+from core.registry import register_named, resolve_registered
 
 TriggerFactory = Dict[str, Type["BaseTrigger"]]
 _registry: TriggerFactory = {}
@@ -43,32 +43,19 @@ class BaseTrigger(ABC):
 
 
 def register_trigger(name: str):
-    def decorator(cls: Type[BaseTrigger]):
-        _registry[name] = cls
-        return cls
-
-    return decorator
+    return register_named(_registry, name)
 
 
 def create_trigger(
     name: str, cfg: TriggerConfig, on_trigger: Callable, **kwargs
 ) -> BaseTrigger:
-    if name not in _registry:
-        import_err: Exception | None = None
-        try:
-            importlib.import_module(f"{__package__}.{name}")
-        except Exception as e:
-            import_err = e
-    if name not in _registry:
-        hint = (
-            f" (import failed: {import_err})"
-            if "import_err" in locals() and import_err
-            else ""
-        )
-        raise ValueError(
-            f"Unknown trigger type '{name}'. Available: {', '.join(_registry.keys()) or 'none'}{hint}"
-        )
-    return _registry[name](cfg, on_trigger, **kwargs)
+    cls = resolve_registered(
+        _registry,
+        name,
+        package=__package__ or "trigger",
+        unknown_label="trigger type",
+    )
+    return cls(cfg, on_trigger, **kwargs)
 
 
 __all__ = ["TriggerConfig", "BaseTrigger", "register_trigger", "create_trigger"]
