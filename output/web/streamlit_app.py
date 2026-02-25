@@ -187,7 +187,9 @@ def build_table_html(records: list[dict]) -> str:
     )
 
 
-def build_stat_html(label: str, value: str | int | float, color: str | None = None) -> str:
+def build_stat_html(
+    label: str, value: str | int | float, color: str | None = None
+) -> str:
     value_style = "font-size:22px;font-weight:600;line-height:1.05;margin-top:2px;"
     if color:
         value_style += f"color:{color};"
