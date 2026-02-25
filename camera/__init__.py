@@ -1,6 +1,7 @@
 from .base import (
     CameraConfig,
     CaptureResult,
+    build_camera_config,
     BaseCamera,
     register_camera,
     create_camera,
@@ -10,6 +11,7 @@ from .base import (
 __all__ = [
     "CameraConfig",
     "CaptureResult",
+    "build_camera_config",
     "BaseCamera",
     "register_camera",
     "create_camera",

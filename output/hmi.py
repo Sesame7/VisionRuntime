@@ -12,7 +12,7 @@ from core import runtime
 from datetime import datetime, timezone
 
 if TYPE_CHECKING:  # pragma: no cover - type hints only
-    from core.runtime import AppContext
+    from core.runtime import AppContext, ResultReadApi
 
 L = logging.getLogger("vision_runtime.output.hmi")
 
@@ -35,7 +35,7 @@ class _ApiServer:
         app = self.app
         ctx = self.context
         index_path = self.index_path
-        store = ctx.result_store
+        store: ResultReadApi = ctx.results
 
         def _serialize_record(rec):
             def _dt(val):
@@ -68,7 +68,7 @@ class _ApiServer:
             return web.json_response(payload)
 
         async def latest_preview(_request):
-            item = ctx.result_store.latest_overlay()
+            item = ctx.results.latest_overlay()
             if item is not None:
                 data, ctype = item
                 return web.Response(body=data, content_type=ctype)

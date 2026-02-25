@@ -5,7 +5,3 @@ PyYAML
 
 # Vision / detection
 opencv-python
-
-# HMI (Streamlit backup)
-streamlit
-streamlit-autorefresh

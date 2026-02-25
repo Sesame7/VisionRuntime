@@ -17,7 +17,7 @@
 
 ## 3. Channel Semantics (Summary)
 
-- HMI: HTTP query only (no push). Endpoints `/status`, `/preview/latest`, and `/trigger` (manual trigger). Data sources are the runtime result store (exposed via OutputManager/AppContext). Static resource `web/index.html`.
+- HMI: HTTP query only (no push). Endpoints `/status`, `/preview/latest`, and `/trigger` (manual trigger). Data sources are the runtime result read API (`AppContext.results`, implemented by `OutputManager`). Static resource `web/index.html`.
   - Web layout: left side is the overlay preview occupying most of the area; right side shows runtime time, manual trigger, counters (OK/NG/ERROR/TOTAL, where NG does not include ERROR), history table, and a runtime online indicator.
   - Display logic: when there is no recent result, summary areas show an explicit empty state (e.g., “Idle”). When `result=ERROR` or `TIMEOUT`, `/preview/latest` returns a red SVG placeholder for on-site visibility.
   - Empty-state API: `/preview/latest` returns 404 when no preview exists.

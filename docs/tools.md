@@ -13,6 +13,7 @@
 - `tools/modbus_sim_server.py`: Modbus TCP simulator for the v2.2 point table.
 - `tools/tcp_listen.py`: TCP listener to inspect incoming trigger payloads.
 - `tools/tcp_send_once.py`: send one TCP trigger payload.
+- `tools/streamlit_hmi.py`: backup Streamlit HMI client (polls the built-in HTTP HMI API).
 
 ## 3. modbus_read.py
 
@@ -55,3 +56,4 @@
 - Do not occupy production ports: host/port should be configurable; defaults should differ from production ports where practical.
 - Do not modify production data: do not write into `data/`, `logs/`, or other production directories. If writing results is needed, require an explicit user-specified path.
 - Dependencies: prefer the same dependency versions as the main project; if extra dependencies are required, document them in README/comments.
+- `tools/streamlit_hmi.py` uses optional dependencies in `requirements-tools-streamlit.txt`.

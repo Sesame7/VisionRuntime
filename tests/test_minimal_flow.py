@@ -1,10 +1,14 @@
 import os
 import time
 import unittest
+from datetime import datetime, timezone
 
-from camera import CameraConfig, create_camera
+import numpy as np
+
+from camera import build_camera_config, create_camera
 from core.config import load_config
 from core.runtime import build_runtime
+from core.worker import AcqTask, DetectQueueManager
 from detect import create_detector
 from trigger import TriggerConfig
 
@@ -25,6 +29,44 @@ def _wait_for_records(output_mgr, count: int, timeout_s: float = 2.0):
 
 
 class TestMinimalFlow(unittest.TestCase):
+    def test_detect_queue_overflow_keeps_newest_task(self):
+        queue_mgr = DetectQueueManager(maxsize=1)
+        dropped_ids = []
+        now = datetime.now(timezone.utc)
+
+        def _sink(rec, _overlay):
+            dropped_ids.append(int(rec.trigger_seq))
+
+        queue_mgr.enqueue(
+            AcqTask(
+                frame_id=1,
+                triggered_at=now,
+                source="TEST",
+                device_id="mock",
+                t0=time.perf_counter(),
+                captured_at=now,
+                image=np.zeros((2, 2, 3), dtype=np.uint8),
+            ),
+            _sink,
+        )
+        queue_mgr.enqueue(
+            AcqTask(
+                frame_id=2,
+                triggered_at=now,
+                source="TEST",
+                device_id="mock",
+                t0=time.perf_counter(),
+                captured_at=now,
+                image=np.zeros((2, 2, 3), dtype=np.uint8),
+            ),
+            _sink,
+        )
+
+        self.assertEqual(queue_mgr.queue.qsize(), 1)
+        remaining = queue_mgr.queue.get_nowait()
+        self.assertEqual(remaining.frame_id, 2)
+        self.assertEqual(dropped_ids, [1])
+
     def test_trigger_mock_camera_overexposure(self):
         if not os.path.exists(DETECT_CONFIG_PATH):
             raise AssertionError(f"missing detect config: {DETECT_CONFIG_PATH}")
@@ -39,27 +81,7 @@ class TestMinimalFlow(unittest.TestCase):
         cfg.runtime.save_dir = TEST_IMAGE_DIR
         cfg.runtime.debounce_ms = 0.0
         cfg.camera.image_dir = TEST_IMAGE_DIR
-        camera_cfg = CameraConfig(
-            save_dir=cfg.runtime.save_dir,
-            ext=cfg.camera.ext,
-            device_index=cfg.camera.device_index,
-            timeout_ms=cfg.camera.grab_timeout_ms,
-            max_retry_per_frame=cfg.camera.max_retry_per_frame,
-            save_images=cfg.camera.save_images,
-            output_pixel_format=cfg.camera.output_pixel_format,
-            width=cfg.camera.width,
-            height=cfg.camera.height,
-            ae_enable=cfg.camera.ae_enable,
-            awb_enable=cfg.camera.awb_enable,
-            exposure_us=cfg.camera.exposure_us,
-            analogue_gain=cfg.camera.analogue_gain,
-            frame_duration_us=cfg.camera.frame_duration_us,
-            settle_ms=cfg.camera.settle_ms,
-            use_still=cfg.camera.use_still,
-            image_dir=cfg.camera.image_dir,
-            order=cfg.camera.order,
-            end_mode=cfg.camera.end_mode,
-        )
+        camera_cfg = build_camera_config(cfg.camera, save_dir=cfg.runtime.save_dir)
         camera = create_camera(cfg.camera.type, camera_cfg)
         detector = create_detector(
             cfg.detect.impl,

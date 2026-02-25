@@ -179,18 +179,32 @@ def shutdown_loop(timeout: float = 1.0):
         _loop_thread_ident = None
 
 
-@dataclass
-class AppContext:
-    trigger_gateway: TriggerGateway
-    result_store: OutputManager
-    queue_mgr: DetectQueueManager
-    result_sink: Callable[[OutputRecord, Optional[Tuple[bytes, str]]], None]
-    modbus_io: Optional[object] = None
-
-
 class TriggerHandle(Protocol):
     def start(self) -> None: ...
     def stop(self) -> None: ...
+
+
+class ResultReadApi(Protocol):
+    @property
+    def latest_records(self) -> list[OutputRecord]: ...
+
+    @property
+    def max_records(self) -> int: ...
+
+    def latest_overlay(self) -> Optional[Tuple[bytes, str]]: ...
+
+    def stats(self) -> dict[str, Any]: ...
+
+    def heartbeat_seq(self) -> int | None: ...
+
+
+@dataclass
+class AppContext:
+    trigger_gateway: TriggerGateway
+    results: ResultReadApi
+    queue_mgr: DetectQueueManager
+    result_sink: Callable[[OutputRecord, Optional[Tuple[bytes, str]]], None]
+    modbus_io: Optional[object] = None
 
 
 class SystemRuntime:
@@ -284,9 +298,6 @@ class SystemRuntime:
         self._stop_heartbeat()
         with contextlib.suppress(Exception):
             self.output_mgr.stop()
-        with contextlib.suppress(Exception):
-            if self.app_context.result_store is not self.output_mgr:
-                self.app_context.result_store.stop()
         with contextlib.suppress(Exception):
             shutdown_loop()
 
@@ -484,7 +495,7 @@ def build_runtime(
             ip_whitelist=ip_whitelist,
             on_overflow=on_trigger_overflow,
         ),
-        result_store=output_mgr,
+        results=output_mgr,
         queue_mgr=queue_mgr,
         result_sink=output_mgr.publish,
     )
@@ -546,6 +557,7 @@ __all__ = [
     "spawn_background_task",
     "shutdown_loop",
     "AppContext",
+    "ResultReadApi",
     "SystemRuntime",
     "build_runtime",
 ]

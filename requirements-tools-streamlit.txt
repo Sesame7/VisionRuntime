@@ -1,0 +1,3 @@
+# Optional dependencies for the backup Streamlit HMI tool (`tools/streamlit_hmi.py`)
+streamlit
+streamlit-autorefresh
