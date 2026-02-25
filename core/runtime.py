@@ -29,7 +29,7 @@ from trigger import TriggerConfig, TriggerGateway
 
 if TYPE_CHECKING:  # pragma: no cover
     from .worker import CameraWorker, DetectQueueManager, DetectWorker
-    from output.manager import OutputManager, ResultStore
+    from output.manager import OutputManager
 
 L = logging.getLogger("vision_runtime.runtime")
 
@@ -182,7 +182,7 @@ def shutdown_loop(timeout: float = 1.0):
 @dataclass
 class AppContext:
     trigger_gateway: TriggerGateway
-    result_store: OutputManager | ResultStore
+    result_store: OutputManager
     queue_mgr: DetectQueueManager
     result_sink: Callable[[OutputRecord, Optional[Tuple[bytes, str]]], None]
     modbus_io: Optional[object] = None
