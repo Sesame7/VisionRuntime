@@ -52,7 +52,9 @@ def create_detector(
             f"Unknown detector impl '{name}'. Available: {', '.join(_registry.keys()) or 'none'}{hint}"
         )
     factory = _registry[name]
-    return factory(params or {}, generate_overlay, input_pixel_format=input_pixel_format)
+    return factory(
+        params or {}, generate_overlay, input_pixel_format=input_pixel_format
+    )
 
 
 def encode_image_jpeg(
