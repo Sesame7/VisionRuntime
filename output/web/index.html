@@ -34,7 +34,7 @@ th { position:sticky; top:0; background:var(--panel-strong); }
 .online.ok .dot { background:var(--ok); box-shadow:0 0 6px rgba(108,207,133,0.6); }
 .online.ng .dot { background:var(--ng); box-shadow:0 0 6px rgba(240,90,90,0.6); }
 .title-time { margin-left:0; color:#eee; }
-.status-time { font-size:16px; margin-left:10px; }
+.status-time { font-size:15px; margin-left:12px; }
 </style>
 </head>
 <body>
@@ -80,14 +80,14 @@ th { position:sticky; top:0; background:var(--panel-strong); }
     <div class="panel">
       <div class="online" id="onlineBox">
         <span class="dot"></span>
-        <span id="onlineText">Runtime: Offline</span>
+        <span id="onlineText">Runtime: Connecting...</span>
       </div>
     </div>
   </div>
 </div>
 <script>
 const REFRESH_MS = 1000;
-const HEARTBEAT_TIMEOUT_MS = 2000;
+const HEARTBEAT_STALE_POLLS = 3;
 const ID_PAD_LEN = 5;
 
 const els = {
@@ -107,6 +107,9 @@ const els = {
 
 async function doTrigger(){ await fetch('/trigger',{method:'POST'}); }
 let lastImgId = null;
+let lastHeartbeatSeq = null;
+let hasHeartbeatProgress = false;
+let staleHeartbeatPolls = HEARTBEAT_STALE_POLLS;
 const baseStats = {total:0,ok:0,ng:0,error:0,pass_rate:0};
 function resultClass(result){
   const r = String(result || '').toUpperCase();
@@ -123,34 +126,71 @@ function renderStats(stats){
 function renderRecords(records, maxRecords){
   const showRecs = records.slice(0, maxRecords);
   els.tbody.innerHTML = '';
-  showRecs.forEach(rec=>{
+  showRecs.forEach(function(rec){
     const id = rec.trigger_seq || 0;
     const duration = typeof rec.duration_ms==='number' ? rec.duration_ms : 0;
     const cls = resultClass(rec.result);
     const tr=document.createElement('tr');
     tr.innerHTML = `<td>${String(id).padStart(ID_PAD_LEN,'0')}</td>
                     <td class="${cls}">${rec.result}</td>
-                    <td>${rec.triggered_at?.slice(0,10) || ''}</td>
-                    <td>${rec.triggered_at?.slice(11,24) || ''}</td>
+                    <td>${rec.triggered_at ? rec.triggered_at.slice(0,10) : ''}</td>
+                    <td>${rec.triggered_at ? rec.triggered_at.slice(11,24) : ''}</td>
                     <td>${duration.toFixed(1)}</td>`;
     els.tbody.appendChild(tr);
   });
   return showRecs;
 }
-function renderOnline(lastTickTs){
-  const now = Date.now();
-  const ok = typeof lastTickTs === 'number' && (now - lastTickTs * 1000) <= HEARTBEAT_TIMEOUT_MS;
-  els.onlineBox.className = 'online ' + (ok ? 'ok' : 'ng');
-  els.onlineText.innerText = ok ? 'Runtime: Online' : 'Runtime: Offline';
+function renderOnline(state){
+  if (state === 'ok'){
+    els.onlineBox.className = 'online ok';
+    els.onlineText.innerText = 'Runtime: Online';
+    return;
+  }
+  if (state === 'pending'){
+    els.onlineBox.className = 'online';
+    els.onlineText.innerText = 'Runtime: Connecting...';
+    return;
+  }
+  els.onlineBox.className = 'online ng';
+  els.onlineText.innerText = 'Runtime: Offline';
+}
+function updateHeartbeatOnline(heartbeatSeq){
+  const hasSeq = typeof heartbeatSeq === 'number' && Number.isFinite(heartbeatSeq);
+  if (!hasSeq){
+    staleHeartbeatPolls += 1;
+    renderOnline(hasHeartbeatProgress && staleHeartbeatPolls < HEARTBEAT_STALE_POLLS ? 'ok' : 'ng');
+    return;
+  }
+  if (lastHeartbeatSeq === null){
+    lastHeartbeatSeq = heartbeatSeq;
+    staleHeartbeatPolls = 0;
+    renderOnline('pending');
+    return;
+  }
+  if (heartbeatSeq > lastHeartbeatSeq){
+    lastHeartbeatSeq = heartbeatSeq;
+    hasHeartbeatProgress = true;
+    staleHeartbeatPolls = 0;
+    renderOnline('ok');
+    return;
+  }
+  if (heartbeatSeq < lastHeartbeatSeq){
+    lastHeartbeatSeq = heartbeatSeq;
+    hasHeartbeatProgress = false;
+    staleHeartbeatPolls = 0;
+    renderOnline('pending');
+    return;
+  }
+  staleHeartbeatPolls += 1;
+  renderOnline(hasHeartbeatProgress && staleHeartbeatPolls < HEARTBEAT_STALE_POLLS ? 'ok' : 'ng');
 }
 function tickClock(){
-  els.clockTime.innerText = new Date().toLocaleTimeString();
+  els.clockTime.innerText = new Date().toLocaleTimeString([], { hour12: false });
 }
 
 async function refresh(){
   try{
     const r=await fetch('/status'); const d=await r.json();
-    tickClock();
     els.statusTime.innerText = 'Idle';
     els.statusTime.className = 'status-time';
     const recs = d.records || [];
@@ -160,8 +200,8 @@ async function refresh(){
     if (showRecs.length){
         const r0 = showRecs[0];
         const id0 = r0.trigger_seq || 0;
-        const date0 = r0.triggered_at?.slice(0,10) || '';
-        const time0 = r0.triggered_at?.slice(11,24) || '';
+        const date0 = r0.triggered_at ? r0.triggered_at.slice(0,10) : '';
+        const time0 = r0.triggered_at ? r0.triggered_at.slice(11,24) : '';
         const cls0 = resultClass(r0.result);
         els.statusTime.className = `status-time ${cls0}`;
         els.statusTime.innerText = `${String(id0).padStart(ID_PAD_LEN,'_')} ${date0} ${time0}`;
@@ -171,12 +211,13 @@ async function refresh(){
           els.img.src='/preview/latest?ts='+Date.now();
         }
       }
-    renderOnline(d.last_tick_ts);
+    updateHeartbeatOnline(d.heartbeat_seq);
   }catch(e){
     console.error(e);
     els.statusTime.innerText = 'Status unreachable';
     els.statusTime.className = 'status-time';
-    renderOnline(null);
+    staleHeartbeatPolls += 1;
+    renderOnline(hasHeartbeatProgress && staleHeartbeatPolls < HEARTBEAT_STALE_POLLS ? 'ok' : 'ng');
   }
 }
 setInterval(tickClock, REFRESH_MS);

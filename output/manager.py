@@ -207,7 +207,7 @@ class OutputManager:
         self._channels: List[OutputChannel] = []
         self._tasks: List[Any] = []
         self._tick_lock = threading.Lock()
-        self._last_tick_ts: float | None = None
+        self._heartbeat_seq: int = 0
 
     def publish(self, rec: OutputRecord, overlay: Optional[Tuple[bytes, str]]):
         # Store as the single source of truth.
@@ -245,7 +245,7 @@ class OutputManager:
     def tick(self):
         ts = time.time()
         with self._tick_lock:
-            self._last_tick_ts = ts
+            self._heartbeat_seq += 1
         for ch in list(self._channels):
             publish = getattr(ch, "publish_heartbeat", None)
             if publish:
@@ -276,9 +276,11 @@ class OutputManager:
     def stats(self):
         return self._store.stats()
 
-    def last_tick_ts(self) -> float | None:
+    def heartbeat_seq(self) -> int | None:
         with self._tick_lock:
-            return self._last_tick_ts
+            if self._heartbeat_seq <= 0:
+                return None
+            return self._heartbeat_seq
 
     # ---- Internal helpers ----
 

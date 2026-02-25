@@ -63,7 +63,7 @@ class _ApiServer:
                 "records": records,
                 "stats": store.stats(),
                 "max_records": store.max_records,
-                "last_tick_ts": getattr(store, "last_tick_ts", lambda: None)(),
+                "heartbeat_seq": store.heartbeat_seq(),
             }
             return web.json_response(payload)
 
