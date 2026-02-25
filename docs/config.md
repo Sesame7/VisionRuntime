@@ -46,22 +46,21 @@
 - `runtime`
   - `save_dir`: base directory for runtime outputs (images/CSV).
   - `max_runtime_s`: auto-stop after N seconds (unit: seconds; `0` = unlimited; startup validation requires `>=0`).
-  - `history_size`: number of recent records kept in memory for HMI (startup validation requires `>0`).
-  - `max_pending_triggers`: Camera→Detect queue capacity (detect task backlog; startup validation requires `>0`).
+  - `detect_queue_capacity`: Camera→Detect queue capacity (detect task backlog; startup validation requires `>0`).
   - Trigger-event queue capacity is currently an internal runtime parameter (default `2`) and is not exposed in the YAML config.
-  - `debounce_ms`: trigger debounce window (unit: ms; startup validation requires `>=0`).
   - `log_level`: global log level (unknown values fall back to `info`).
-  - `opencv_num_threads`: optional OpenCV thread count override (`>0` applies override; `<=0` keeps OpenCV default behavior).
 - `imports`
   - A top-level list; each element is a string Python import path (e.g. `"my_project.custom_detector"`).
   - Purpose: preload optional registries / side-effect registrations (mostly custom plugins); built-in modules usually do not need it. Import failures cause startup failure (error should include the specific path and exception text). Empty list is allowed.
 - `camera`
+  - Structure: `camera.type` selects the adapter, `camera.common` carries shared fields, and `camera.<type>` carries adapter-specific overrides (e.g. `camera.mock`, `camera.raspi`, `camera.opt`, `camera.hik`).
+    - Merge order at load time: dataclass defaults -> `camera.common` -> selected `camera.<type>`.
   - `type`: adapter registry name.
-  - `device_index`, `grab_timeout_ms`, `max_retry_per_frame`, `output_pixel_format` (bgr8/mono8).
+  - `device_index`, `grab_timeout_ms`, `max_retry_per_frame`, `capture_output_format` (bgr8/mono8).
     - Units/effective constraints: `grab_timeout_ms` is milliseconds (startup validation requires `>0`; adapter/SDK semantics still apply). `max_retry_per_frame` requires `>0` at startup.
-  - `save_images`, `ext` (naming/rules are described in the camera document; config only contains switches and paths).
-    - `ext` is normalized at startup: empty -> `.bmp`; missing leading dot is auto-added.
-    - `output_pixel_format` is normalized to lowercase; empty -> `bgr8`.
+  - `save_images`, `save_ext` (naming/rules are described in the camera document; config only contains switches and paths).
+    - `save_ext` is normalized at startup: empty -> `.bmp`; missing leading dot is auto-added.
+    - `capture_output_format` is normalized to lowercase; empty -> `bgr8`.
   - Generic capture/adapter parameters: `width`, `height`.
     - Effective behavior: adapter-specific. For `raspi`, width/height override is applied only when both are non-zero; otherwise adapter defaults are used.
   - Camera-control related fields (primarily used by adapters that support runtime control, e.g. `raspi`): `ae_enable`, `awb_enable`, `exposure_us`, `analogue_gain`, `frame_duration_us`, `settle_ms`, `use_still`.
@@ -69,8 +68,10 @@
   - `image_dir`, `order`, `end_mode` (mock camera only; see camera doc).
     - Mock-camera constraints: `image_dir` is required; `order` / `end_mode` are validated against fixed enumerations in `camera.mock`.
 - `trigger`
+  - `debounce_ms`: trigger debounce window (unit: ms; startup validation requires `>=0`).
   - Global filters: `global_min_interval_ms`, `high_priority_cooldown_ms`, `high_priority_sources`/`low_priority_sources`, `ip_whitelist`.
     - Units/effective constraints: interval/cooldown are milliseconds and are clamped to `>=0` inside `TriggerGateway`; empty `ip_whitelist` disables allowlist enforcement.
+    - `ip_whitelist` currently applies only to network-origin triggers (`TCP` / `WEB`) and does not block local/internal sources such as `MODBUS`.
   - Source names used by `high_priority_sources` / `low_priority_sources` are case-sensitive runtime identifiers (current implementation uses `"TCP"`, `"WEB"`, `"MODBUS"`, etc.).
   - Source enablement and required params are grouped by source:
     - `trigger.tcp`: `enabled`, `word` (`word` is UTF-8 encoded at startup; non-string values are stringified before encoding)
@@ -80,10 +81,13 @@
   - `config_file`: points to `detect_*.yaml`, validate existence at startup.
   - `timeout_ms`: per-frame detection timeout (unit: ms).
     - Effective behavior: `0` disables timeout classification in the worker. Startup validation requires `>=0`.
-  - Preview control: `enable_preview`, `generate_overlay`.
-    - Effective behavior: detector overlay generation is enabled only when both flags are true in the runtime startup path.
+  - Preview control: `preview_enabled`.
+    - Effective behavior: when enabled, detector overlay generation and HMI preview encoding are both enabled in the runtime startup path.
 - `output`
-  - Output enable switches live here (e.g., `enable_http`, `enable_modbus`, `write_csv`).
+  - `output.hmi`: HMI output settings (e.g., `enabled`, `history_size`).
+    - `history_size`: number of recent records kept in memory for HMI (startup validation requires `>0`).
+  - `output.modbus`: Modbus output settings (e.g., `enabled`).
+  - `write_csv`: enable CSV result writing.
   - Modbus IO: address/offset settings live under `comm.modbus`.
 
 ## 7. Effective Changes and Operations Notes
@@ -95,6 +99,6 @@
 ## 8. Alignment with Other Modules
 
 - Data contracts/channels/time semantics: `core/contracts` is the single source of truth.  
-- Backpressure and queues: Detect→Output has no queue. Current runtime also uses a bounded trigger queue before CameraWorker (default capacity `2`, internal parameter, not YAML-configurable yet); `runtime.max_pending_triggers` controls the Camera→Detect queue.  
+- Backpressure and queues: Detect→Output has no queue. Current runtime also uses a bounded trigger queue before CameraWorker (default capacity `2`, internal parameter, not YAML-configurable yet); `runtime.detect_queue_capacity` controls the Camera→Detect queue.  
 - Async boundary: config contains only business parameters like network/timeouts/retries; threading/loop/shutdown strategy is uniformly managed by `SystemRuntime` in `core/runtime`.  
 - Trigger/Camera/Detect/Output read their own config blocks and do not parse other modules’ fields.

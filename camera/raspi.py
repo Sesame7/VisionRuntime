@@ -77,7 +77,6 @@ class RaspiCamera(BaseCamera):
             trigger_seq=idx,
             source="",
             device_id="raspi",
-            path=None,
             image=bgr,
             timings={"grab_ms": grab_ms},
             captured_at=datetime.now(timezone.utc),

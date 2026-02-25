@@ -1,25 +1,41 @@
 # -- coding: utf-8 --
 from __future__ import annotations
 
-import contextlib
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 from aiohttp import web
 import os
 
-from core import runtime
+from core.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
 from datetime import datetime, timezone
+from core.contracts import OutputRecord
 
 if TYPE_CHECKING:  # pragma: no cover - type hints only
-    from core.runtime import AppContext, ResultReadApi
+    from core.runtime import ResultReadApi
+
+
+class AppContextLike(Protocol):
+    @property
+    def trigger_gateway(self) -> Any: ...
+
+    @property
+    def results(self) -> "ResultReadApi": ...
+
 
 L = logging.getLogger("vision_runtime.output.hmi")
 
 
 class _ApiServer:
     def __init__(
-        self, host: str, port: int, context: AppContext, index_path: str, task_reg=None
+        self,
+        host: str,
+        port: int,
+        context: AppContextLike,
+        index_path: str,
+        task_reg=None,
+        *,
+        loop_runner: LoopRunner,
     ):
         self.host = host
         self.port = port
@@ -29,7 +45,12 @@ class _ApiServer:
         self._setup_routes()
         self._runner = None
         self._started = False
-        self._task_reg = task_reg
+        self._tasks = AsyncTaskOwner(
+            task_reg=task_reg,
+            logger=L,
+            owner_name="hmi_api_server",
+            loop_runner=loop_runner,
+        )
 
     def _setup_routes(self):
         app = self.app
@@ -79,7 +100,7 @@ class _ApiServer:
             if not last_items:
                 return web.Response(status=404)
             rec = last_items[0]
-            result = str(getattr(rec, "result", "") or "").upper()
+            result = str(rec.result or "").upper()
             abbr = "ERR" if result == "ERROR" else ("TO" if result == "TIMEOUT" else "")
             if not abbr:
                 return web.Response(status=404)
@@ -106,10 +127,7 @@ class _ApiServer:
         if self._started:
             return
         L.info("HMI web service running @ http://%s:%d", self.host, self.port)
-        task = runtime.spawn_background_task(self._serve())
-        if self._task_reg:
-            with contextlib.suppress(Exception):
-                self._task_reg(task)
+        self._tasks.spawn(self._serve())
         self._started = True
 
     async def _serve(self):
@@ -119,45 +137,54 @@ class _ApiServer:
         await site.start()
 
     def stop(self):
+        self._tasks.cancel_and_clear_local_tasks()
+
         async def _cleanup():
             if self._runner:
                 await self._runner.cleanup()
             self._runner = None
 
-        runtime.run_async(_cleanup(), timeout=0.5)
+        run_async_cleanup(
+            _cleanup(),
+            timeout=0.5,
+            loop_runner=self._tasks.loop_runner,
+        )
         self._started = False
         L.info("HMI web service stopped")
-
-    @property
-    def is_running(self) -> bool:
-        return self._started
 
 
 class HmiOutput:
     def __init__(
-        self, host: str, port: int, context: AppContext, index_path: str, task_reg=None
+        self,
+        host: str,
+        port: int,
+        context: AppContextLike,
+        index_path: str,
+        task_reg=None,
+        *,
+        loop_runner: LoopRunner,
     ):
         self.server = _ApiServer(
-            host, port, context, index_path=index_path, task_reg=task_reg
+            host,
+            port,
+            context,
+            index_path=index_path,
+            task_reg=task_reg,
+            loop_runner=loop_runner,
         )
-        self._started = False
 
     def start(self):
         self.server.start()
-        self._started = True
 
     def stop(self):
         self.server.stop()
-        self._started = False
 
-    def publish(self, rec, overlay):
+    def publish(self, rec: OutputRecord, overlay: tuple[bytes, str] | None):
         # HMI pulls data via HTTP; no push needed.
+        _ = rec, overlay
         return None
 
     def publish_heartbeat(self, ts: float | None = None):
         # Heartbeat is served via /status; no push needed.
+        _ = ts
         return None
-
-    @property
-    def is_running(self) -> bool:
-        return self._started

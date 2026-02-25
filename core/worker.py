@@ -1,4 +1,3 @@
-import contextlib
 import logging
 import queue
 import threading
@@ -10,6 +9,7 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 
 from core.contracts import CaptureResult, OutputRecord
+from core.queue_utils import drain_queue_nowait
 from core.runtime import BaseWorker
 from detect import encode_image_jpeg
 
@@ -97,27 +97,22 @@ class CameraWorker(BaseWorker):
                 event = self.trigger_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
-            source = getattr(event, "source", "")
-            t0_val = getattr(event, "monotonic_ms", None)
-            t0 = (
-                (t0_val / 1000.0)
-                if isinstance(t0_val, (int, float))
-                else time.perf_counter()
-            )
-            frame_id = getattr(event, "trigger_seq", None) or self.id_manager.next_id()
-            start_dt = datetime.now(timezone.utc)
-            triggered_at = getattr(event, "triggered_at", start_dt) or start_dt
             try:
+                source = event.source
+                t0_val = event.monotonic_ms
+                t0 = (
+                    (t0_val / 1000.0)
+                    if isinstance(t0_val, (int, float))
+                    else time.perf_counter()
+                )
+                frame_id = event.trigger_seq or self.id_manager.next_id()
+                start_dt = datetime.now(timezone.utc)
+                triggered_at = event.triggered_at or start_dt
                 res: CaptureResult
                 with self.camera.lock:
                     res = self.camera.capture_once(frame_id, triggered_at=triggered_at)
-                device_id = str(
-                    getattr(res, "device_id", "")
-                    or getattr(getattr(self.camera, "cfg", None), "device_index", "")
-                )
-                captured_at = getattr(res, "captured_at", None) or datetime.now(
-                    timezone.utc
-                )
+                device_id = str(res.device_id or self.camera.cfg.device_index)
+                captured_at = res.captured_at or datetime.now(timezone.utc)
                 if not res.success or res.image is None:
                     error_msg = res.error or "capture_failed"
                     msg = (
@@ -153,11 +148,8 @@ class CameraWorker(BaseWorker):
                     grab_ms=(res.timings or {}).get("grab_ms") if res.timings else None,
                 )
                 self.detect_mgr.enqueue(task, self.result_sink)
-            except Exception:
-                L.exception("Camera worker error")
             finally:
-                with contextlib.suppress(Exception):
-                    self.trigger_queue.task_done()
+                self.trigger_queue.task_done()
 
 
 class DetectQueueManager:
@@ -198,8 +190,7 @@ class DetectQueueManager:
                 L.warning("Queue full, dropping frame %s", dropped.frame_id)
                 _record_drop(dropped)
                 # Mark dropped task as done to keep queue counters consistent.
-                with contextlib.suppress(Exception):
-                    self.queue.task_done()
+                self.queue.task_done()
             try:
                 self.queue.put_nowait(task)
                 return
@@ -209,14 +200,7 @@ class DetectQueueManager:
                 _record_drop(task, remark="queue_overflow_incoming")
 
     def clear(self):
-        while True:
-            try:
-                self.queue.get_nowait()
-            except queue.Empty:
-                break
-            finally:
-                with contextlib.suppress(Exception):
-                    self.queue.task_done()
+        drain_queue_nowait(self.queue)
         self.queue_overflow_count = 0
 
 
@@ -227,14 +211,14 @@ class DetectWorker(BaseWorker):
         result_sink: Callable[[OutputRecord, Optional[Tuple[bytes, str]]], None],
         detector,
         timeout_ms: float = 2000.0,
-        enable_preview: bool = True,
+        preview_enabled: bool = True,
     ):
         super().__init__("DetectWorker")
         self.queue_mgr = queue_mgr
         self.result_sink = result_sink
         self.detector = detector
         self.timeout_ms = timeout_ms
-        self.enable_preview = enable_preview
+        self.preview_enabled = preview_enabled
 
     def run(self):
         while not self._stop_evt.is_set():
@@ -245,16 +229,7 @@ class DetectWorker(BaseWorker):
             try:
                 img = task.image
                 det_start = time.perf_counter()
-                try:
-                    ok, message, overlay_img, result_code = self.detector.detect(img)
-                except Exception:
-                    L.exception("Detect error")
-                    ok, message, overlay_img, result_code = (
-                        False,
-                        "Error: detection exception",
-                        None,
-                        "ERROR",
-                    )
+                ok, message, overlay_img, result_code = self.detector.detect(img)
                 detect_ms = (time.perf_counter() - det_start) * 1000
                 rec = _to_output_record(
                     frame_id=task.frame_id,
@@ -273,18 +248,11 @@ class DetectWorker(BaseWorker):
                 preview_bytes = None
                 preview_mime = None
                 if (
-                    self.enable_preview
+                    self.preview_enabled
                     and overlay_img is not None
                     and rec.result in ("OK", "NG")
                 ):
-                    try:
-                        preview_bytes, preview_mime = _encode_image(overlay_img)
-                    except Exception:
-                        L.warning(
-                            "Preview encode failed; disable detect.enable_preview or install dependencies",
-                            exc_info=True,
-                        )
-                        preview_bytes, preview_mime = None, None
+                    preview_bytes, preview_mime = _encode_image(overlay_img)
                 overlay = (
                     (preview_bytes, preview_mime)
                     if (preview_bytes and preview_mime)
@@ -302,8 +270,7 @@ class DetectWorker(BaseWorker):
                 )
                 self.result_sink(rec, overlay)
             finally:
-                with contextlib.suppress(Exception):
-                    self.queue_mgr.queue.task_done()
+                self.queue_mgr.queue.task_done()
 
 
 def _to_output_record(

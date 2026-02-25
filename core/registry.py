@@ -25,17 +25,12 @@ def resolve_registered(
     unknown_label: str,
 ) -> T:
     """Resolve a registry entry, lazily importing `<package>.<name>` if needed."""
-    import_err: Exception | None = None
     if name not in registry:
-        try:
-            importlib.import_module(f"{package}.{name}")
-        except Exception as e:
-            import_err = e
+        importlib.import_module(f"{package}.{name}")
     if name not in registry:
-        hint = f" (import failed: {import_err})" if import_err else ""
         raise ValueError(
             f"Unknown {unknown_label} '{name}'. "
-            f"Available: {', '.join(registry.keys()) or 'none'}{hint}"
+            f"Available: {', '.join(registry.keys()) or 'none'}"
         )
     return registry[name]
 

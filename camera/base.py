@@ -47,29 +47,41 @@ def build_camera_config(
 ) -> CameraConfig:
     return CameraConfig(
         save_dir=save_dir,
-        ext=str(ext if ext is not None else getattr(cfg_block, "ext", ".bmp")),
-        device_index=int(getattr(cfg_block, "device_index", 0)),
-        timeout_ms=int(getattr(cfg_block, "grab_timeout_ms", 2000)),
-        max_retry_per_frame=int(getattr(cfg_block, "max_retry_per_frame", 3)),
-        save_images=bool(getattr(cfg_block, "save_images", True)),
-        output_pixel_format=str(
+        ext=_normalize_ext(ext if ext is not None else cfg_block.save_ext),
+        device_index=int(cfg_block.device_index),
+        timeout_ms=int(cfg_block.grab_timeout_ms),
+        max_retry_per_frame=int(cfg_block.max_retry_per_frame),
+        save_images=bool(cfg_block.save_images),
+        output_pixel_format=_normalize_pixel_format(
             output_pixel_format
             if output_pixel_format is not None
-            else getattr(cfg_block, "output_pixel_format", "bgr8")
+            else cfg_block.capture_output_format
         ),
-        width=int(getattr(cfg_block, "width", 0)),
-        height=int(getattr(cfg_block, "height", 0)),
-        ae_enable=bool(getattr(cfg_block, "ae_enable", True)),
-        awb_enable=bool(getattr(cfg_block, "awb_enable", True)),
-        exposure_us=int(getattr(cfg_block, "exposure_us", 0)),
-        analogue_gain=float(getattr(cfg_block, "analogue_gain", 0.0)),
-        frame_duration_us=int(getattr(cfg_block, "frame_duration_us", 0)),
-        settle_ms=int(getattr(cfg_block, "settle_ms", 200)),
-        use_still=bool(getattr(cfg_block, "use_still", True)),
-        image_dir=str(getattr(cfg_block, "image_dir", "")),
-        order=str(getattr(cfg_block, "order", "name_asc")),
-        end_mode=str(getattr(cfg_block, "end_mode", "loop")),
+        width=int(cfg_block.width),
+        height=int(cfg_block.height),
+        ae_enable=bool(cfg_block.ae_enable),
+        awb_enable=bool(cfg_block.awb_enable),
+        exposure_us=int(cfg_block.exposure_us),
+        analogue_gain=float(cfg_block.analogue_gain),
+        frame_duration_us=int(cfg_block.frame_duration_us),
+        settle_ms=int(cfg_block.settle_ms),
+        use_still=bool(cfg_block.use_still),
+        image_dir=str(cfg_block.image_dir),
+        order=str(cfg_block.order),
+        end_mode=str(cfg_block.end_mode),
     )
+
+
+def _normalize_ext(ext: object) -> str:
+    raw = str(ext or "")
+    if not raw:
+        return ".bmp"
+    return raw if raw.startswith(".") else f".{raw}"
+
+
+def _normalize_pixel_format(value: object) -> str:
+    fmt = str(value or "").strip().lower()
+    return fmt or "bgr8"
 
 
 class BaseCamera(ABC):
@@ -102,6 +114,14 @@ def create_camera(name: str, cfg: CameraConfig) -> BaseCamera:
     return cls(cfg)
 
 
+def create_camera_from_loaded_config(cfg) -> BaseCamera:
+    image_root = os.path.join(cfg.runtime.save_dir, "images")
+    if bool(cfg.camera.save_images):
+        ensure_dir(image_root)
+    cam_cfg = build_camera_config(cfg.camera, save_dir=image_root)
+    return create_camera(cfg.camera.type, cam_cfg)
+
+
 def ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
@@ -113,5 +133,6 @@ __all__ = [
     "BaseCamera",
     "register_camera",
     "create_camera",
+    "create_camera_from_loaded_config",
     "ensure_dir",
 ]

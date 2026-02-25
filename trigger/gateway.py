@@ -1,4 +1,3 @@
-import contextlib
 import logging
 import queue
 import threading
@@ -9,6 +8,7 @@ from typing import Callable, Optional, Set
 from core.contracts import TriggerEvent
 
 L = logging.getLogger("vision_runtime.gateway")
+NETWORK_WHITELIST_SOURCES = {"TCP", "WEB"}
 
 
 class TriggerGateway:
@@ -38,11 +38,14 @@ class TriggerGateway:
         self._seq = 0
 
     def report_raw_trigger(
-        self, source: str, payload: object | None = None, remote_ip: str | None = None
+        self,
+        source: str,
+        payload: object | None = None,
+        remote_ip: object | None = None,
     ) -> bool:
         now = time.perf_counter()
         with self._lock:
-            if self.ip_whitelist is not None:
+            if self.ip_whitelist is not None and source in NETWORK_WHITELIST_SOURCES:
                 remote_ip_str = self._normalize_ip(remote_ip)
                 if remote_ip_str not in self.ip_whitelist:
                     L.debug("Reject trigger from disallowed IP %s", remote_ip)
@@ -84,15 +87,15 @@ class TriggerGateway:
             self.trigger_queue.put_nowait(event)
             return True
         except queue.Full:
-            dropped = None
-            with contextlib.suppress(queue.Empty):
+            try:
                 dropped = self.trigger_queue.get_nowait()
-                with contextlib.suppress(Exception):
-                    self.trigger_queue.task_done()
+            except queue.Empty:
+                dropped = None
+            if dropped is not None:
+                self.trigger_queue.task_done()
             L.warning("Trigger queue full, dropping oldest and accepting %s", source)
             if dropped and self.on_overflow:
-                with contextlib.suppress(Exception):
-                    self.on_overflow(dropped)
+                self.on_overflow(dropped)
             try:
                 self.trigger_queue.put_nowait(event)
                 return True

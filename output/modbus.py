@@ -9,17 +9,15 @@ from core.modbus_io import ModbusIO
 class ModbusOutput:
     def __init__(self, modbus_io: ModbusIO):
         self.io = modbus_io
-        self._started = False
 
     def start(self):
         self.io.start()
-        self._started = True
 
     def stop(self):
         self.io.stop()
-        self._started = False
 
-    def publish(self, rec: OutputRecord, overlay):
+    def publish(self, rec: OutputRecord, overlay: tuple[bytes, str] | None):
+        _ = overlay
         trig_time = rec.triggered_at or datetime.now(timezone.utc)
         seq = int(rec.trigger_seq or 0) & 0xFFFF
         result_code, error_code = _map_result_codes(rec)
@@ -39,20 +37,14 @@ class ModbusOutput:
 
     def publish_heartbeat(self, ts: float | None = None):
         # ModbusIO handles its own heartbeat loop.
+        _ = ts
         return None
-
-    @property
-    def is_running(self) -> bool:
-        return self._started
 
 
 def _saturate_u16(value: float | int | None) -> int:
     if value is None:
         return 0
-    try:
-        v = int(round(float(value)))
-    except Exception:
-        v = 0
+    v = int(round(float(value)))
     if v < 0:
         return 0
     return 0xFFFF if v > 0xFFFF else v
@@ -61,7 +53,7 @@ def _saturate_u16(value: float | int | None) -> int:
 def _map_result_codes(rec: OutputRecord) -> tuple[int, int]:
     result = (rec.result or "").strip().upper()
     result_code = 3  # ERROR
-    error_code = 2  # DETECT_EXCEPTION default
+    error_code = 2  # Generic processing error default
     if result == "OK":
         return 1, 0
     if result == "NG":
@@ -72,8 +64,6 @@ def _map_result_codes(rec: OutputRecord) -> tuple[int, int]:
     rc = (rec.result_code or "").strip().upper()
     if rc == "TIMEOUT":
         error_code = 1
-    elif rc == "DETECT_EXCEPTION":
-        error_code = 2
     elif rc == "CAMERA_ERROR":
         error_code = 3
     elif rc == "QUEUE_OVERFLOW":

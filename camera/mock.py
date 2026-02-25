@@ -179,7 +179,6 @@ class MockCamera(BaseCamera):
             trigger_seq=idx,
             source="",
             device_id="mock",
-            path=None,
             image=arr,
             timings={"grab_ms": read_ms},
             captured_at=captured_at,

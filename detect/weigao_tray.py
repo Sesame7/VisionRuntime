@@ -9,18 +9,12 @@ from .base import register_detector
 
 
 def _odd_k(k: Any) -> int:
-    try:
-        v = int(float(k))
-    except Exception:
-        v = 1
+    v = int(float(k))
     return max(1, v) | 1
 
 
 def _clamp_int(v: Any, lo: int, hi: int) -> int:
-    try:
-        x = int(round(float(v)))
-    except Exception:
-        x = lo
+    x = int(round(float(v)))
     return lo if x < lo else hi if x > hi else x
 
 
@@ -111,11 +105,8 @@ class _SlotD:
 
 def _as_bgr_triplet(value: Any, default: Tuple[int, int, int]) -> Tuple[int, int, int]:
     if isinstance(value, (list, tuple)) and len(value) == 3:
-        try:
-            b, g, r = value
-            return (int(b), int(g), int(r))
-        except Exception:
-            return default
+        b, g, r = value
+        return (int(b), int(g), int(r))
     return default
 
 
@@ -147,7 +138,7 @@ class WeigaoTrayDetector:
         self.params = params or {}
         self.generate_overlay = bool(generate_overlay)
         if input_pixel_format and input_pixel_format.lower() != "bgr8":
-            raise ValueError("weigao_tray requires camera.output_pixel_format=bgr8")
+            raise ValueError("weigao_tray requires camera.capture_output_format=bgr8")
 
         self._load_params()
         self._cached_rois: Optional[List[Tuple[int, int, int, int, int, int]]] = None
@@ -392,18 +383,15 @@ class WeigaoTrayDetector:
         roi[m] = blended[m]
 
     def detect(self, img: np.ndarray):
-        try:
-            return self._detect_impl(img)
-        except Exception as e:
-            return False, f"Error: {e}", None, "ERROR"
+        return self._detect_impl(img)
 
     def _detect_impl(self, img: np.ndarray):
-        if img is None or getattr(img, "size", 0) == 0:
+        if img is None or img.size == 0:
             return False, "Error: empty image", None, "ERROR"
         if img.ndim != 3 or img.shape[2] != 3:
             return (
                 False,
-                f"Error: expected BGR image HxWx3, got shape={getattr(img, 'shape', None)}",
+                f"Error: expected BGR image HxWx3, got shape={img.shape}",
                 None,
                 "ERROR",
             )

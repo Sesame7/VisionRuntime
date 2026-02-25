@@ -38,11 +38,41 @@
 - Shutdown order: stop trigger sources first → stop acquisition → stop detection/Output → close async services (gracefully close handles) → `shutdown_loop()` → exit.
 - External interface: `start()` / `stop()`.
 
-## 7. Logging and Error Semantics
+## 7. Unified Lifecycle Conventions
+
+- Ownership boundaries:
+  - `main.py` owns process-level concerns (CLI/config/bootstrap) and currently owns the camera adapter session context (`with camera.session(): ...`).
+  - `SystemRuntime` owns runtime start/stop orchestration for workers, triggers, output channels, heartbeat thread, queue draining, and shared async-loop shutdown.
+  - Output/trigger implementations own their protocol handles/servers, but must not own the global async loop lifecycle.
+- Async loop ownership:
+  - The shared asyncio loop is created via helpers in `core/runtime` and is closed only by `shutdown_loop()`.
+  - Plugins/channels/triggers must not call `loop.close()` or stop/replace the shared loop directly.
+- Start/stop contracts (component-level):
+  - `start()` should be idempotent (safe to call more than once without duplicating resources/tasks).
+  - `stop()` should be best-effort and bounded (request cancellation/closure and wait briefly, but avoid unbounded blocking).
+  - Re-entrant `stop()` should be tolerated when practical (especially for output/trigger adapters).
+- Task ownership and cleanup:
+  - Background tasks created by output-related services should be adopted through `OutputManager.adopt_task(...)` so `OutputManager.stop()` can perform final cancel/await cleanup.
+  - If task registration is unavailable or fails, the component must retain local ownership and clean up its own fallback tasks.
+  - Avoid double ownership of the same task (duplicate cancel/wait calls are usually safe but make shutdown behavior harder to reason about).
+- Shutdown sequencing (runtime-level convention):
+  - Stop trigger sources first (prevent new events entering queues).
+  - Stop acquisition/detect workers next.
+  - Drain pending detect tasks / synthesize terminal results as needed.
+  - Stop heartbeat and output channels.
+  - Finally call `shutdown_loop()` to close the shared async loop.
+- Timeout policy:
+  - All waits in shutdown paths should be bounded (thread join, task await, server cleanup).
+  - Timeouts are operational safeguards, not a "hard kill" mechanism; on timeout, log a warning and continue shutdown progress when possible.
+- Shutdown observability policy:
+  - Routine shutdown timing diagnostics (stage elapsed timings, `shutdown_loop pending_tasks=0`) are DEBUG-level by default.
+  - Non-empty pending task reports in `shutdown_loop()` remain visible at INFO level to aid field diagnostics.
+
+## 8. Logging and Error Semantics
 
 - Start/stop: INFO; shutdown timeout: WARNING; uncaught Worker exceptions or startup failures: ERROR.
 - In production, log only to the console (global `log_level`); file logging follows Output debugging strategies; this module does not write files.
 
-## 8. Future Extensions
+## 9. Future Extensions
 
 - Optional auto-restart, more Worker concurrency, finer-grained metrics, etc. are future evolutions and are not in the current implementation.

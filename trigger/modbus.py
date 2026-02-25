@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from core import runtime
+from core.lifecycle import AsyncTaskOwner, LoopRunner
 from trigger.base import BaseTrigger, TriggerConfig, register_trigger
 
 L = logging.getLogger("vision_runtime.trigger.modbus")
@@ -18,11 +18,18 @@ class ModbusTrigger(BaseTrigger):
         modbus_io,
         poll_ms: int = 20,
         on_reset=None,
+        *,
+        loop_runner: LoopRunner,
     ):
         super().__init__(cfg, on_trigger)
         self._io = modbus_io
         self._poll_ms = max(int(poll_ms), 5)
         self._on_reset = on_reset
+        self._tasks = AsyncTaskOwner(
+            logger=L,
+            owner_name="modbus_trigger",
+            loop_runner=loop_runner,
+        )
         self._task = None
         self._last_cmd_trig = None
         self._last_cmd_reset = None
@@ -30,16 +37,15 @@ class ModbusTrigger(BaseTrigger):
     def start(self):
         if self._task:
             return
-        self._task = runtime.spawn_background_task(self._poll_loop())
+        self._tasks.clear_local_tasks()
+        self._task = self._tasks.spawn(self._poll_loop())
 
     def stop(self):
         task = self._task
         self._task = None
         if task is None:
             return
-        cancel = getattr(task, "cancel", None)
-        if callable(cancel):
-            cancel()
+        self._tasks.cancel_and_clear_local_tasks()
         L.info("Modbus trigger stopped")
 
     async def _poll_loop(self):
@@ -57,22 +63,11 @@ class ModbusTrigger(BaseTrigger):
 
             if trig_val != last_trig:
                 self._last_cmd_trig = trig_val
-                try:
-                    accepted = bool(self.on_trigger("MODBUS"))
-                except Exception:
-                    L.warning("Modbus trigger handler failed", exc_info=True)
-                    accepted = False
+                accepted = bool(self.on_trigger("MODBUS"))
                 if accepted:
                     self._io.toggle_di(1)  # ST_ACCEPT_TOGGLE
 
             if reset_val != last_reset:
                 self._last_cmd_reset = reset_val
                 if self._on_reset:
-                    try:
-                        self._on_reset()
-                    except Exception:
-                        L.warning("Modbus reset handler failed", exc_info=True)
-
-    @property
-    def is_running(self) -> bool:
-        return bool(self._task)
+                    self._on_reset()

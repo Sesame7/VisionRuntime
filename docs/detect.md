@@ -19,7 +19,7 @@
 ## 3. Preview and Overlay
 
 - The detector may return an overlay image; the worker optionally encodes it as JPEG for HMI preview.
-- Preview encoding is controlled by `detect.enable_preview`. Overlay generation is controlled by `detect.generate_overlay` when creating the detector.
+- Preview encoding is controlled by `detect.preview_enabled`. Overlay generation follows the same switch when creating the detector.
 - Detect does not persist original images; preview is display-only.
 
 ## 4. DetectWorker Behavior

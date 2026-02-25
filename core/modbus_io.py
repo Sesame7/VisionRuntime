@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Sequence
 
+from core.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
 from core.pymodbus_compat import (
     ModbusDeviceContext,
     ModbusSequentialDataBlock,
@@ -16,8 +17,6 @@ from core.pymodbus_compat import (
     is_modbus_exception,
 )
 
-from core import runtime
-
 L = logging.getLogger("vision_runtime.modbus.io")
 
 
@@ -25,11 +24,9 @@ def _require_values(
     values: Sequence[int] | Sequence[bool] | object, count: int, label: str
 ) -> list[int]:
     if is_modbus_exception(values):
-        L.warning("Modbus read failed for %s: %r", label, values)
-        return [0] * max(0, int(count))
+        raise RuntimeError(f"Modbus read failed for {label}: {values!r}")
     if not isinstance(values, Iterable):
-        L.warning("Modbus read returned non-iterable for %s: %r", label, values)
-        return [0] * max(0, int(count))
+        raise RuntimeError(f"Modbus read returned non-iterable for {label}: {values!r}")
     vals = list(values)
     if len(vals) < count:
         vals += [0] * (count - len(vals))
@@ -46,6 +43,8 @@ class ModbusIO:
         ir_offset: int,
         heartbeat_ms: int,
         task_reg=None,
+        *,
+        loop_runner: LoopRunner,
     ):
         self.host = host
         self.port = port
@@ -53,10 +52,14 @@ class ModbusIO:
         self.di_offset = max(int(di_offset), 0)
         self.ir_offset = max(int(ir_offset), 0)
         self.heartbeat_ms = max(int(heartbeat_ms), 100)
-        self._task_reg = task_reg
         self._lock = threading.Lock()
         self._server: ModbusTcpServerType | None = None
-        self._tasks: list[object] = []
+        self._tasks = AsyncTaskOwner(
+            task_reg=task_reg,
+            logger=L,
+            owner_name="modbus_io",
+            loop_runner=loop_runner,
+        )
 
         # pymodbus server adds +1 internally; base must be offset + 1.
         coil_base = self.coil_offset + 1
@@ -75,33 +78,29 @@ class ModbusIO:
         if self._server:
             return
         L.info("Modbus TCP server listening on %s:%d", self.host, self.port)
-        self._tasks = [
-            self._register_task(runtime.spawn_background_task(self._serve())),
-            self._register_task(runtime.spawn_background_task(self._heartbeat_loop())),
-        ]
+        self._tasks.cancel_and_clear_local_tasks()
+        self._tasks.spawn(self._serve())
+        self._tasks.spawn(self._heartbeat_loop())
 
     def stop(self):
         async def _cleanup():
-            for task in list(self._tasks):
-                cancel = getattr(task, "cancel", None)
-                if callable(cancel):
-                    cancel()
+            # Tasks successfully registered via task_reg are owned/cancelled by the
+            # external manager (OutputManager). Only local fallback tasks are
+            # cancelled here.
+            self._tasks.cancel_local_tasks()
             if self._server:
-                asyncio_server = getattr(self._server, "server", None)
-                if asyncio_server:
-                    asyncio_server.close()
-                    if hasattr(asyncio_server, "wait_closed"):
-                        await asyncio_server.wait_closed()
-                await self._server.shutdown()
+                server = self._server
+                server.close()
+                await server.shutdown()
 
-        runtime.run_async(_cleanup(), timeout=0.5)
+        run_async_cleanup(
+            _cleanup(),
+            timeout=0.5,
+            loop_runner=self._tasks.loop_runner,
+        )
         self._server = None
-        self._tasks.clear()
+        self._tasks.cancel_and_clear_local_tasks()
         L.info("Modbus TCP server stopped")
-
-    @property
-    def is_running(self) -> bool:
-        return bool(self._server)
 
     def read_coils(self, offset: int, count: int) -> list[int]:
         with self._lock:
@@ -137,23 +136,13 @@ class ModbusIO:
             self._set_values_locked(2, self.di_offset + 0, [0] * 6, "di_reset")
             self._set_values_locked(4, self.ir_offset + 0, [0] * 10, "ir_reset")
 
-    def _register_task(self, task):
-        if self._task_reg:
-            try:
-                return self._task_reg(task)
-            except Exception:
-                L.warning("Failed to register modbus background task", exc_info=True)
-        return task
-
     async def _serve(self):
+        server = ModbusTcpServer(self._context, address=(self.host, self.port))
+        self._server = server
         try:
-            server = ModbusTcpServer(self._context, address=(self.host, self.port))
-            self._server = server
             await server.serve_forever()
         except asyncio.CancelledError:
             return
-        except Exception:
-            L.exception("Modbus server stopped unexpectedly")
 
     async def _heartbeat_loop(self):
         interval_s = max(self.heartbeat_ms, 100) / 1000.0
@@ -167,7 +156,7 @@ class ModbusIO:
     ):
         res = self._device_ctx.setValues(func_code, address, list(values))
         if is_modbus_exception(res):
-            L.warning("Modbus write failed for %s: %r", label, res)
+            raise RuntimeError(f"Modbus write failed for {label}: {res!r}")
 
     def _toggle_di_locked(self, idx: int):
         addr = self.di_offset + int(idx)

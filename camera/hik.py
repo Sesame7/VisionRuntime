@@ -616,11 +616,7 @@ class HikCamera(BaseCamera):
                 if result:
                     path, arr, ts = result
                     if path:
-                        try:
-                            rel_path = os.path.relpath(path)
-                        except Exception:
-                            rel_path = path
-                        L.info("[%5s] @ %s", idx, rel_path)
+                        L.info("[%5s] @ %s", idx, path)
                     else:
                         L.info("[%5s] captured (no file save)", idx)
                     return CaptureResult(
@@ -628,7 +624,6 @@ class HikCamera(BaseCamera):
                         trigger_seq=idx,
                         source="",
                         device_id=str(self.cfg.device_index),
-                        path=path,
                         image=arr,
                         timings={"grab_ms": grab_ms},
                         captured_at=ts,
@@ -699,12 +694,11 @@ class HikCamera(BaseCamera):
             finally:
                 try:
                     self.cam.stop_grabbing()
-                except Exception:
-                    L.warning("stop grabbing failed", exc_info=True)
-                try:
-                    self.cam.close_device()
                 finally:
-                    self.cam.destroy_handle()
+                    try:
+                        self.cam.close_device()
+                    finally:
+                        self.cam.destroy_handle()
         finally:
             MvCamera.finalize()
 
