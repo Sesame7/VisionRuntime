@@ -1,11 +1,6 @@
 # Example main config for the Weigao tray detector.
 # Copy/rename to `main_*.yaml` and keep ONLY ONE `main_*.yaml` under config/ to run.
-
-imports:
-  - "camera.opt"
-  - "trigger.tcp"
-  - "output.hmi"
-  - "output.modbus"
+# `imports` is optional; built-in camera/trigger/detect modules are loaded lazily.
 
 runtime:
   save_dir: "data"

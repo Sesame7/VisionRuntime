@@ -25,7 +25,7 @@
 
 1) Construct the default config object (dataclass), apply known fields, and warn on unknown fields to prevent typos being silently ignored.  
 2) Scan and load the main config `main_*.yaml`, bind blocks into Runtime/Camera/Trigger/Output/Detect metadata, etc.; on validation failure, provide “file + field path”.  
-2.5) Optionally import extra plugin modules according to the `imports` list from the main config (string Python import paths). Import failure is a startup error (must include filename + failing import path). An empty/missing list is allowed because camera/trigger/detect modules can be lazily imported when instantiated.  
+2.5) Optionally import extra plugin modules according to the `imports` list from the main config (string Python import paths). Import failure is a startup error (must include filename + failing import path). An empty/missing list is allowed because built-in camera/trigger/detect modules can be lazily imported when instantiated, and output channels are assembled directly in runtime wiring.  
 3) Read `detect.config_file` from the main config; load the detection-parameter YAML (typically under `config/`) into `detect_params`.  
 4) Pass the loaded config object to the runtime assembly path; use `detect.impl` to choose the detector implementation and pass `detect_params` to it.  
 5) Detection params are not validated here; detectors should validate their own parameters if needed.
@@ -53,8 +53,8 @@
   - `log_level`: global log level (unknown values fall back to `info`).
   - `opencv_num_threads`: optional OpenCV thread count override (`>0` applies override; `<=0` keeps OpenCV default behavior).
 - `imports`
-  - A top-level list; each element is a string Python import path (e.g. `"camera.opt"`, `"output.modbus"`).
-  - Purpose: preload optional registries / side-effect registrations; import failures cause startup failure (error should include the specific path and exception text). Empty list is allowed.
+  - A top-level list; each element is a string Python import path (e.g. `"my_project.custom_detector"`).
+  - Purpose: preload optional registries / side-effect registrations (mostly custom plugins); built-in modules usually do not need it. Import failures cause startup failure (error should include the specific path and exception text). Empty list is allowed.
 - `camera`
   - `type`: adapter registry name.
   - `device_index`, `grab_timeout_ms`, `max_retry_per_frame`, `output_pixel_format` (bgr8/mono8).

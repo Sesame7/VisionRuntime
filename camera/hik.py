@@ -12,6 +12,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from camera.base import BaseCamera, CameraConfig, CaptureResult, register_camera
+from camera.save_utils import DailyDirCache, build_dated_frame_path
 
 L = logging.getLogger("vision_runtime.camera.hik")
 
@@ -505,16 +506,7 @@ def _image_type_from_path(path: str) -> int:
     return MV_Image_Bmp
 
 
-def _format_filename(frame_id, ext, ts_utc: Optional[datetime] = None):
-    ref = ts_utc or datetime.now(timezone.utc)
-    if ref.tzinfo is None:
-        ref = ref.replace(tzinfo=timezone.utc)
-    ref = ref.astimezone(timezone.utc)
-    ts = ref.strftime("%H-%M-%S.%f")[:-3] + "Z"
-    return f"{ts}_{int(frame_id):05d}{ext}"
-
-
-_DATE_CACHE: dict[str, str | None] = {"date": None, "path": None}
+_DATE_CACHE = DailyDirCache()
 
 
 def _convert_frame(
@@ -562,20 +554,13 @@ def _process_frame(
     path = None
     save_ret = MV_OK
     if cfg.save_images:
-        file_ts_utc = trigger_ts_utc or now_utc
-        if file_ts_utc.tzinfo is None:
-            file_ts_utc = file_ts_utc.replace(tzinfo=timezone.utc)
-        file_ts_utc = file_ts_utc.astimezone(timezone.utc)
-        date_dir = file_ts_utc.date().isoformat()
-        if _DATE_CACHE["date"] != date_dir or not _DATE_CACHE["path"]:
-            target_dir = os.path.join(cfg.save_dir, date_dir)
-            os.makedirs(target_dir, exist_ok=True)
-            _DATE_CACHE["date"] = date_dir
-            _DATE_CACHE["path"] = target_dir
-        target_dir = _DATE_CACHE["path"]
         file_id = frame_id if frame_id is not None else int(frame.stFrameInfo.nFrameNum)
-        path = os.path.join(
-            target_dir, _format_filename(file_id, cfg.ext, ts_utc=file_ts_utc)
+        path, _ = build_dated_frame_path(
+            cfg.save_dir,
+            file_id,
+            cfg.ext,
+            ts_utc=(trigger_ts_utc or now_utc),
+            cache=_DATE_CACHE,
         )
         save_ret = _save_image(
             cam, path, _output_pixel_type(cfg), buf, buf_len, width, height

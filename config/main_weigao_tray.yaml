@@ -1,9 +1,3 @@
-imports:
-  - "camera.mock"
-  - "trigger.modbus"
-  - "output.hmi"
-  - "output.modbus"
-
 runtime:
   save_dir: "data"
   max_runtime_s: 0
