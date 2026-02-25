@@ -303,14 +303,35 @@ class WeigaoTrayDetector:
 
     def _load_params(self) -> None:
         p = self.params
+        self.grid_cfg = self._parse_grid_cfg(p)
+        self.yellow_lower, self.yellow_upper = self._parse_yellow_hsv(p)
+        self.rod_cfg = self._parse_rod_cfg(p)
 
+        j = p.get("junction") or {}
+        self.junction_cfg = self._parse_junction_cfg(j)
+        self.white_cfg = self._parse_white_cfg(j)
+        self.split_cfg = self._parse_split_cfg(j)
+        self.height_cfg = self._parse_height_cfg(j)
+
+        self.band_cfg = self._parse_band_cfg(p)
+        self.offset_cfg = self._parse_offset_cfg(p)
+        self.overlay_cfg = self._parse_overlay_cfg(p)
+        self.dbg_cfg = self._parse_dbg_cfg(p)
+
+        self._validate()
+
+    @staticmethod
+    def _kernel_size_from_half_window(half_window: int) -> int:
+        return int(2 * half_window + 1) if int(half_window) > 0 else 0
+
+    def _parse_grid_cfg(self, p: dict) -> _GridCfg:
         grid = p.get("grid") or {}
         roi = grid.get("roi") or {}
         anchor_left_raw = list(grid.get("anchor_left") or [])
         anchor_right_raw = list(grid.get("anchor_right") or [])
         cols_per_row = list(grid.get("cols_per_row") or [17, 17, 17])
         rows = len(cols_per_row)
-        self.grid_cfg = _GridCfg(
+        return _GridCfg(
             rows=rows,
             cols_per_row=cols_per_row,
             anchor_left=[
@@ -323,20 +344,23 @@ class WeigaoTrayDetector:
             roi_h=int(roi.get("height", 200)),
         )
 
+    def _parse_yellow_hsv(self, p: dict) -> Tuple[np.ndarray, np.ndarray]:
         yh = p.get("yellow_hsv") or {}
-        self.yellow_lower = np.array(yh.get("lower") or [10, 160, 40], dtype=np.uint8)
-        self.yellow_upper = np.array(yh.get("upper") or [30, 255, 255], dtype=np.uint8)
+        lower = np.array(yh.get("lower") or [10, 160, 40], dtype=np.uint8)
+        upper = np.array(yh.get("upper") or [30, 255, 255], dtype=np.uint8)
+        return lower, upper
 
+    def _parse_rod_cfg(self, p: dict) -> _RodStageCfg:
         rod = p.get("rod") or {}
-        self.rod_cfg = _RodStageCfg(
+        return _RodStageCfg(
             min_mask_area=float(rod.get("min_mask_area", 3500)),
         )
 
-        j = p.get("junction") or {}
+    def _parse_junction_cfg(self, j: dict) -> _JunctionStageCfg:
         search_region = j.get("search_region") or {}
         y_window = search_region.get("y_window") or {}
         strips = search_region.get("strips") or {}
-        self.junction_cfg = _JunctionStageCfg(
+        return _JunctionStageCfg(
             bottom_anchor_percentile=float(j.get("bottom_anchor_percentile", 98.0)),
             y_window_up_px=int(y_window.get("up_px", 60)),
             y_window_down_px=int(y_window.get("down_px", 30)),
@@ -344,6 +368,7 @@ class WeigaoTrayDetector:
             strip_width_px=int(strips.get("width_px", 24)),
         )
 
+    def _parse_white_cfg(self, j: dict) -> _WhiteCfg:
         white = j.get("white")
         if white is None:
             white_rows_raw: List[Any] = [{} for _ in range(self.grid_cfg.rows)]
@@ -368,28 +393,28 @@ class WeigaoTrayDetector:
                     upper=np.array([179, _clamp_u8(s_max), 255], dtype=np.uint8),
                 )
             )
-        self.white_cfg = _WhiteCfg(by_row=white_rows)
+        return _WhiteCfg(by_row=white_rows)
 
+    def _parse_split_cfg(self, j: dict) -> _SplitStageCfg:
         split = j.get("split") or {}
         split_min_rows = split.get("min_rows") or {}
-        split_smooth_half_win = int(split.get("smooth_half_window_rows", 3))
-        split_kernel_size = 0
-        if split_smooth_half_win > 0:
-            split_kernel_size = int(2 * split_smooth_half_win + 1)
-        self.split_cfg = _SplitStageCfg(
-            smooth_half_window_rows=split_smooth_half_win,
+        smooth_half_window_rows = int(split.get("smooth_half_window_rows", 3))
+        return _SplitStageCfg(
+            smooth_half_window_rows=smooth_half_window_rows,
             min_rows_above=int(split_min_rows.get("above", 2)),
             min_rows_below=int(split_min_rows.get("below", 2)),
-            kernel_size=split_kernel_size,
+            kernel_size=self._kernel_size_from_half_window(smooth_half_window_rows),
         )
 
+    def _parse_height_cfg(self, j: dict) -> _HeightStageCfg:
         junction_height = j.get("height") or {}
-        self.height_cfg = _HeightStageCfg(
+        return _HeightStageCfg(
             max_upward_deviation_px=int(
                 junction_height.get("max_upward_deviation_px", 12)
             )
         )
 
+    def _parse_band_cfg(self, p: dict) -> _BandStageCfg:
         band = p.get("band") or {}
         band_search_region = band.get("search_region") or {}
         band_y_from_junction = band_search_region.get("y_from_junction_px") or {}
@@ -399,46 +424,44 @@ class WeigaoTrayDetector:
         band_saturation = band_color.get("saturation") or {}
         band_width_px = band.get("width_px") or {}
 
-        band_smooth_half_win = int(band_saturation.get("smooth_half_window_cols", 2))
-        band_kernel_size = 0
-        if band_smooth_half_win > 0:
-            band_kernel_size = int(2 * band_smooth_half_win + 1)
-        self.band_cfg = _BandStageCfg(
+        smooth_half_window_cols = int(band_saturation.get("smooth_half_window_cols", 2))
+        return _BandStageCfg(
             y_from_junction_top_px=int(band_y_from_junction.get("top", 3)),
             y_from_junction_bottom_px=int(band_y_from_junction.get("bottom", 30)),
             x_half_width_px=int(band_x_window.get("half_width_px", 30)),
             hue_low=int(band_hue_range.get("low", 0)),
             hue_high=int(band_hue_range.get("high", 179)),
-            saturation_smooth_half_window_cols=band_smooth_half_win,
+            saturation_smooth_half_window_cols=smooth_half_window_cols,
             saturation_threshold=int(band_saturation.get("threshold", 30)),
             width_min_px=int(band_width_px.get("min", 10)),
             width_max_px=int(band_width_px.get("max", 0)),
-            kernel_size=band_kernel_size,
+            kernel_size=self._kernel_size_from_half_window(smooth_half_window_cols),
         )
 
+    def _parse_offset_cfg(self, p: dict) -> _OffsetStageCfg:
         offset = p.get("offset") or {}
-        self.offset_cfg = _OffsetStageCfg(
+        return _OffsetStageCfg(
             reference_edge_shift_px=float(offset.get("reference_edge_shift_px", 3)),
             tolerance_px=float(offset.get("tolerance_px", 11)),
         )
 
+    def _parse_overlay_cfg(self, p: dict) -> _OverlayStyleCfg:
         overlay = p.get("overlay") or {}
-        self.overlay_cfg = _OverlayStyleCfg(
+        return _OverlayStyleCfg(
             ok_bgr=_as_bgr_triplet(overlay.get("ok_bgr"), (0, 200, 0)),
             ng_bgr=_as_bgr_triplet(overlay.get("ng_bgr"), (0, 0, 220)),
             line_width=max(1, int(overlay.get("line_width", 2))),
         )
 
+    def _parse_dbg_cfg(self, p: dict) -> _DebugOverlayCfg:
         dbg = p.get("dbg") or {}
-        self.dbg_cfg = _DebugOverlayCfg(
+        return _DebugOverlayCfg(
             show_mask=bool(dbg.get("show_mask", False)),
             show_strips=bool(dbg.get("show_strips", False)),
             show_band=bool(dbg.get("show_band", False)),
             bgr=(220, 0, 0),  # blue in BGR
             mask_bgr=(140, 60, 0),  # darker orange in BGR
         )
-
-        self._validate()
 
     def _validate(self) -> None:
         grid_cfg = self.grid_cfg
@@ -711,7 +734,6 @@ class WeigaoTrayDetector:
         fail_tracker: _FailTracker,
     ) -> List[_SlotD]:
         height_cfg = self.height_cfg
-        junction_cfg = self.junction_cfg
         overlay_cfg = self.overlay_cfg
         baseline_by_row: List[Optional[float]] = [
             float(np.median(ys)) if ys else None for ys in junction_by_row
