@@ -1,43 +1,42 @@
-grid:
-  cols_per_row: [17, 17, 17]
-  anchor_left:
+slot_layout:
+  slots_per_row: [17, 17, 17]
+  left_anchors:
   - { x: 154, y: 66 }
   - { x: 123, y: 733 }
   - { x: 104, y: 1419 }
-  anchor_right:
+  right_anchors:
   - { x: 2740, y: 66 }
   - { x: 2766, y: 733 }
   - { x: 2791, y: 1419 }
-  roi: { width: 150, height: 200 }
-yellow_hsv:
-  lower: [10, 140, 30]
-  upper: [50, 255, 255]
-rod: { min_mask_area: 50 }
-junction:
-  bottom_anchor_percentile: 99
-  search_region:
-    y_window: { up_px: 60, down_px: 40 }
-    strips: { center_offset_x_px: 20, width_px: 28 }
-  white:
-    - { S_max: 30, V_min: 110 }
-    - { S_max: 30, V_min: 100 }
-    - { S_max: 30, V_min: 90 }
+  slot_roi: { width_px: 150, height_px: 200 }
+stem:
+  hsv: { lower: [10, 140, 30], upper: [50, 255, 255] }
+  min_area_px: 50
+  bottom_exclude_percentile: 80
+junction_line:
+  search_band:
+    y_from_anchor_px: { up: 20, down: 40 }
+    x_radius_from_stem_center_px: { outer: 34, inner_exclude: 12 }
+  white_by_row:
+    - { s_max: 30, v_min: 110 }
+    - { s_max: 30, v_min: 100 }
+    - { s_max: 30, v_min: 90 }
   split:
-    smooth_half_window_rows: 3
-    min_rows: { above: 3, below: 3 }
-  height: { max_upward_deviation_px: 20 }
-band:
-  search_region:
-    y_from_junction_px: { top: 5, bottom: 30 }
-    x_window: { half_width_px: 30 }
-  color:
+    smooth_window_rows: 9
+    min_split_rows: { above: 5, below: 5 }
+  height_check: { max_deviation_px: 15 }
+color_band:
+  search_window:
+    y_below_junction_line_px: { from: 10, to: 30 }
+    x_radius_from_stem_center_px: 25
+  color_response:
     hue_range: { low: 0, high: 179 }
-    saturation: { threshold: 30, smooth_half_window_cols: 2 }
-  width_px: { min: 10, max: 0 }
-offset: { reference_edge_shift_px: 8, tolerance_px: 5 }
-overlay:
-  # Colors are BGR integers (OpenCV).
-  ok_bgr: [0, 200, 0]
-  ng_bgr: [0, 0, 220]
-  line_width: 3
-dbg: { show_roi: false, show_mask: false, show_strips: false, show_band: false }
+    saturation: { threshold: 30, smooth_window_cols: 5 }
+  width_check_px: { min: 10, max: 0 }
+  alignment_check: { reference_x_shift_px: 8, tolerance_px: 5 }
+result_overlay: { ok_bgr: [0, 200, 0], ng_bgr: [0, 0, 220], stroke_width_px: 4 }
+debug_overlay:
+  slot_layout: false
+  stem_mask: false
+  junction_line: false
+  color_band: false
