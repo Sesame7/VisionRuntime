@@ -491,7 +491,7 @@ def _save_image(
     save_param.nDataLen = buf_len
     save_param.pData = ctypes.cast(buf, ctypes.POINTER(ctypes.c_ubyte))
     save_param.enImageType = _image_type_from_path(path)
-    save_param.pcImagePath = ctypes.create_string_buffer(path.encode("ascii"))
+    save_param.pcImagePath = ctypes.create_string_buffer(os.fsencode(path))
     save_param.nQuality = 80
     save_param.iMethodValue = 1
     return cam.save_image_to_file(save_param)

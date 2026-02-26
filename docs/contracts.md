@@ -32,11 +32,11 @@
 - `success: bool`: capture success flag.
 - `error: str | None`: preserve raw SDK error text; should be None on success.
 - `image: Any | None`: mono8 (H x W) or bgr8 (H x W x 3); uses `Any` to avoid hard dependency.
-- `path: str | None`: saved path if saved successfully; None if not saved or on failure.
 - `timings: Dict[str, float] | None`: optional timing metrics (e.g. grab_ms).
 - Timestamps:
   - `triggered_at: datetime | None`: trigger time (from Trigger).
   - `captured_at: datetime | None`: SDK grab completion time.
+- Note: the current `CaptureResult` dataclass does not include a `path` field; image-save paths (if any) are adapter-local/logging concerns.
 
 ### 3.3 OutputRecord (for HMI/Modbus/CSV)
 

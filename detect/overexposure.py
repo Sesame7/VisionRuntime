@@ -18,7 +18,7 @@ def detect_overexposure(
         gray = (
             img_u16[:, :, 2] * 77 + img_u16[:, :, 1] * 150 + img_u16[:, :, 0] * 29
         ) >> 8
-        gray = gray.astype(np.uint8, copy=False)
+    gray = gray.astype(np.uint8, copy=False)
     mask = gray >= threshold
     ratio = float(mask.mean())
     is_ng = ratio > ratio_threshold
@@ -48,16 +48,11 @@ class OverExposureDetector:
         _ = input_pixel_format
         self.threshold = int(params.get("overexp_threshold", 245))
         self.ratio_threshold = float(params.get("overexp_ratio", 0.02))
-        self.downscale_factor = float(params.get("downscale_factor", 1.0))
         self.generate_overlay = generate_overlay
 
     def detect(self, img: np.ndarray):
-        target = img
-        if self.downscale_factor < 0.999:
-            step = max(1, int(round(1.0 / self.downscale_factor)))
-            target = img[::step, ::step]
         ratio, is_ng, overlay = detect_overexposure(
-            target,
+            img,
             threshold=self.threshold,
             ratio_threshold=self.ratio_threshold,
             return_overlay=self.generate_overlay,

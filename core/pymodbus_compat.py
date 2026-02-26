@@ -7,9 +7,6 @@ import importlib
 import importlib.util
 from typing import Any, TYPE_CHECKING, TypeAlias
 
-from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext
-from pymodbus.server import ModbusTcpServer
-
 
 def _import_attr(module_name: str, attr_name: str) -> Any | None:
     spec = importlib.util.find_spec(module_name)
@@ -32,6 +29,27 @@ def _first_attr(candidates: list[tuple[str, str]], label: str) -> Any:
 
 ExcCodes = _import_attr("pymodbus.constants", "ExcCodes")
 ExceptionResponse = _import_attr("pymodbus.pdu", "ExceptionResponse")
+ModbusSequentialDataBlock = _first_attr(
+    [
+        ("pymodbus.datastore", "ModbusSequentialDataBlock"),
+        ("pymodbus.datastore.store", "ModbusSequentialDataBlock"),
+    ],
+    "ModbusSequentialDataBlock",
+)
+ModbusServerContext = _first_attr(
+    [
+        ("pymodbus.datastore", "ModbusServerContext"),
+        ("pymodbus.datastore.context", "ModbusServerContext"),
+    ],
+    "ModbusServerContext",
+)
+ModbusTcpServer = _first_attr(
+    [
+        ("pymodbus.server", "ModbusTcpServer"),
+        ("pymodbus.server.async_io", "ModbusTcpServer"),
+    ],
+    "ModbusTcpServer",
+)
 
 ModbusDeviceContext = _first_attr(
     [
@@ -46,12 +64,23 @@ if TYPE_CHECKING:
         from pymodbus.datastore import ModbusDeviceContext as _ModbusDeviceContextType  # type: ignore[reportAttributeAccessIssue]
     except Exception:
         from pymodbus.datastore import ModbusSlaveContext as _ModbusDeviceContextType  # type: ignore[reportAttributeAccessIssue]
+    try:
+        from pymodbus.datastore import ModbusServerContext as _ModbusServerContextType  # type: ignore[reportAttributeAccessIssue]
+    except Exception:
+        from pymodbus.datastore.context import (
+            ModbusServerContext as _ModbusServerContextType,
+        )  # type: ignore[reportAttributeAccessIssue]
+    try:
+        from pymodbus.server import ModbusTcpServer as _ModbusTcpServerType  # type: ignore[reportAttributeAccessIssue]
+    except Exception:
+        from pymodbus.server.async_io import ModbusTcpServer as _ModbusTcpServerType  # type: ignore[reportAttributeAccessIssue]
     ModbusDeviceContextType: TypeAlias = _ModbusDeviceContextType
+    ModbusServerContextType: TypeAlias = _ModbusServerContextType
+    ModbusTcpServerType: TypeAlias = _ModbusTcpServerType
 else:
     ModbusDeviceContextType: TypeAlias = Any
-
-ModbusServerContextType: TypeAlias = ModbusServerContext
-ModbusTcpServerType: TypeAlias = ModbusTcpServer
+    ModbusServerContextType: TypeAlias = Any
+    ModbusTcpServerType: TypeAlias = Any
 
 
 def is_modbus_exception(value: object) -> bool:

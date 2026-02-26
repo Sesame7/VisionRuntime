@@ -92,22 +92,24 @@ Core sections:
 - `detect`: detector implementation and config file / preview settings
 - `output`: HMI/Modbus/CSV switches (including `output.hmi.history_size`)
 
-Camera config is split by implementation: use `camera.common` for shared fields and `camera.<type>` for adapter-specific fields (for example `camera.mock`, `camera.raspi`, `camera.opt`).
+Camera config is split by implementation: use `camera.common` for shared fields and `camera.<type>` for adapter-specific fields (for example `camera.mock`, `camera.raspi`, `camera.opt`, `camera.hik`).
 
 ### Raspberry Pi camera (Picamera2)
 
 ```yaml
 camera:
   type: "raspi"
-  width: 4056
-  height: 3040
-  ae_enable: false
-  awb_enable: false
-  exposure_us: 100000
-  analogue_gain: 1.0
-  frame_duration_us: 100000
-  settle_ms: 200
-  use_still: true
+  common:
+    width: 4056
+    height: 3040
+  raspi:
+    ae_enable: false
+    awb_enable: false
+    exposure_us: 100000
+    analogue_gain: 1.0
+    frame_duration_us: 100000
+    settle_ms: 200
+    use_still: true
 ```
 
 Notes:
@@ -131,7 +133,7 @@ For built-in modules, `imports` is usually not required; keep it for custom/exte
 
 ## Outputs
 
-- Images: `<runtime.save_dir>/images` when `camera.save_images` is true (default)
+- Images: `<runtime.save_dir>/images` when camera image saving is enabled (typically `camera.common.save_images: true`)
 - CSV: `<runtime.save_dir>/images/YYYY-MM-DD/records.csv` when `output.write_csv` is true
 
 ## Optional Tools

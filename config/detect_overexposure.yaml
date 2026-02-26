@@ -1,4 +1,4 @@
 # Minimal overexposure config used by tests and demos.
+# Detector now always runs on full image; `downscale_factor` was removed.
 overexp_threshold: 245
 overexp_ratio: 0.02
-downscale_factor: 1.0

@@ -2,11 +2,17 @@
 """OutputManager: persist results and fan out to output channels."""
 
 import asyncio
+import csv
+import logging
 import os
 import queue
 import threading
 import time
-from concurrent.futures import Future as ConcurrentFuture
+from concurrent.futures import (
+    CancelledError as ConcurrentCancelledError,
+    Future as ConcurrentFuture,
+    TimeoutError as ConcurrentTimeoutError,
+)
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -14,12 +20,15 @@ from typing import Any, Protocol
 from core.contracts import OutputRecord
 from core.lifecycle import LoopRunner
 
+L = logging.getLogger("vision_runtime.output.manager")
+
 
 class OutputChannel(Protocol):
     def start(self): ...
     def stop(self): ...
     def publish(self, rec: OutputRecord, overlay: tuple[bytes, str] | None): ...
     def publish_heartbeat(self, ts: float | None = None): ...
+    def raise_if_failed(self): ...
 
 
 class ResultStore:
@@ -45,19 +54,23 @@ class ResultStore:
             if write_csv
             else None
         )
+        self._writer_error: Exception | None = None
         if write_csv:
             os.makedirs(self.csv_root_dir, exist_ok=True)
         # Fresh start on each run; do not preload historical CSV into registers.
         if self._writer_thread:
             self._writer_thread.start()
 
-    def stop(self):
+    def stop(self, timeout: float = 1.0):
         thread = self._writer_thread
         q = self._write_queue
         if thread is None or q is None:
             return
         q.put(self._STOP_SENTINEL)
-        thread.join()
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            L.warning("ResultStore writer thread did not exit within %.2fs", timeout)
+            return
         self._writer_thread = None
         self._write_queue = None
 
@@ -118,32 +131,65 @@ class ResultStore:
             "pass_rate": pass_rate,
         }
 
+    def raise_if_failed(self):
+        err = self._writer_error
+        if err is not None:
+            raise RuntimeError(
+                f"ResultStore writer thread failed ({type(err).__name__})"
+            ) from err
+        thread = self._writer_thread
+        if thread is not None and not thread.is_alive():
+            raise RuntimeError("ResultStore writer thread stopped unexpectedly")
+
     def _writer_loop(self):
-        queue_ref = self._write_queue
-        if queue_ref is None:
-            raise RuntimeError("writer queue missing")
-        while True:
-            item = queue_ref.get()
-            try:
-                if item is None:
-                    break
-                assert item is not None
-                self._append_csv(item)
-            finally:
-                queue_ref.task_done()
+        try:
+            queue_ref = self._write_queue
+            if queue_ref is None:
+                raise RuntimeError("writer queue missing")
+            while True:
+                item = queue_ref.get()
+                try:
+                    if item is None:
+                        break
+                    assert item is not None
+                    self._append_csv(item)
+                finally:
+                    queue_ref.task_done()
+        except Exception as exc:
+            self._writer_error = exc
+            L.exception("ResultStore CSV writer thread failed")
 
     def _append_csv(self, rec: OutputRecord):
         csv_path = self._csv_path_for_record(rec)
         write_header = not os.path.exists(csv_path)
         t_date, t_time = _fmt_date_time(rec.triggered_at)
         save_time = _fmt_time(rec.detected_at)
-        with open(csv_path, "a", encoding="utf-8") as f:
+        with open(csv_path, "a", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
             if write_header:
-                f.write(
-                    "id,trigger_date,trigger_time,save_finish_time,result,result_code,duration_ms,remark\n"
+                writer.writerow(
+                    [
+                        "id",
+                        "trigger_date",
+                        "trigger_time",
+                        "save_finish_time",
+                        "result",
+                        "result_code",
+                        "duration_ms",
+                        "remark",
+                    ]
                 )
-            f.write(
-                f"{rec.trigger_seq},{t_date},{t_time},{save_time},{rec.result},{rec.result_code or ''},{(rec.duration_ms or 0.0):.3f},{rec.remark}\n"
+            writer.writerow(
+                [
+                    rec.trigger_seq,
+                    t_date,
+                    t_time,
+                    save_time,
+                    rec.result,
+                    rec.result_code or "",
+                    f"{(rec.duration_ms or 0.0):.3f}",
+                    rec.remark or "",
+                ]
             )
 
     def _csv_path_for_record(self, rec: OutputRecord) -> str:
@@ -196,10 +242,22 @@ class OutputManager:
             ch.start()
 
     def stop(self):
-        for ch in self._channels:
-            ch.stop()
-        self._drain_tasks()
-        self._store.stop()
+        def _run_stage(name: str, fn):
+            try:
+                fn()
+            except Exception:
+                L.exception("OutputManager stop stage failed: %s", name)
+
+        def _stop_channels():
+            for ch in self._channels:
+                try:
+                    ch.stop()
+                except Exception:
+                    L.exception("Output channel stop failed: %r", ch)
+
+        _run_stage("channels", _stop_channels)
+        _run_stage("tasks", self._drain_tasks)
+        _run_stage("store", self._store.stop)
 
     def reset(self):
         self._store.reset()
@@ -209,6 +267,14 @@ class OutputManager:
         self._heartbeat_seq += 1
         for ch in self._channels:
             ch.publish_heartbeat(ts)
+
+    def raise_if_failed(self):
+        self._store.raise_if_failed()
+        for ch in self._channels:
+            checker = getattr(ch, "raise_if_failed", None)
+            if checker is None:
+                continue
+            checker()
 
     def adopt_task(self, task: Any) -> bool:
         if task is None:
@@ -251,14 +317,31 @@ class OutputManager:
                 threadsafe_futs.append(t)
 
         if asyncio_tasks:
-            self._loop_runner.run_async(
-                asyncio.wait(asyncio_tasks, timeout=timeout),
-                timeout=timeout,
-            )
+            try:
+                self._loop_runner.run_async(
+                    asyncio.wait(asyncio_tasks, timeout=timeout),
+                    timeout=timeout,
+                )
+            except Exception:
+                L.exception("OutputManager async task drain failed")
 
         for fut in threadsafe_futs:
-            if not fut.done():
+            if fut.done():
+                try:
+                    fut.result()
+                except ConcurrentCancelledError:
+                    continue
+                except Exception:
+                    L.exception("OutputManager background future failed during drain")
+                continue
+            try:
                 fut.result(timeout=timeout)
+            except ConcurrentCancelledError:
+                continue
+            except ConcurrentTimeoutError:
+                L.warning("OutputManager future drain timeout after %.2fs", timeout)
+            except Exception:
+                L.exception("OutputManager background future failed during drain")
 
 
 __all__ = ["ResultStore", "OutputManager", "OutputChannel"]

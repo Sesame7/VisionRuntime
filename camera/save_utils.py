@@ -23,15 +23,22 @@ class DailyDirCache:
     """Cache the current UTC date directory to avoid repeated mkdir/path joins."""
 
     def __init__(self):
+        self._root_key: str | None = None
         self._date_key: str | None = None
         self._dir_path: str | None = None
 
     def get_or_create(self, root_dir: str, ts_utc: datetime) -> str:
         ref = normalize_utc_datetime(ts_utc)
         date_key = ref.date().isoformat()
-        if self._date_key != date_key or not self._dir_path:
+        root_key = os.path.abspath(root_dir)
+        if (
+            self._root_key != root_key
+            or self._date_key != date_key
+            or not self._dir_path
+        ):
             target_dir = os.path.join(root_dir, date_key)
             os.makedirs(target_dir, exist_ok=True)
+            self._root_key = root_key
             self._date_key = date_key
             self._dir_path = target_dir
         return self._dir_path

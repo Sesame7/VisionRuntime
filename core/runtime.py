@@ -1,4 +1,4 @@
-"""Core runtime: BaseWorker and SystemRuntime orchestration."""
+"""Core runtime: SystemRuntime orchestration and runtime assembly."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import os
 import queue
 import threading
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import (
@@ -42,8 +43,8 @@ class RuntimeBuildConfig:
     http_port: int = 8080
     enable_http: bool = True
     detect_queue_capacity: int = 50
-    # "off" | "trigger" | "output" | "both"
-    modbus_mode: str = "off"
+    enable_modbus_trigger: bool = False
+    enable_modbus_output: bool = False
     modbus_host: str = "0.0.0.0"
     modbus_port: int = 5020
     coil_offset: int = 800
@@ -56,16 +57,6 @@ class RuntimeBuildConfig:
 
 
 def build_runtime_config_from_loaded_config(cfg) -> RuntimeBuildConfig:
-    modbus_trigger_enabled = bool(cfg.trigger.modbus.enabled)
-    modbus_output_enabled = bool(cfg.output.modbus.enabled)
-    if modbus_trigger_enabled and modbus_output_enabled:
-        modbus_mode = "both"
-    elif modbus_output_enabled:
-        modbus_mode = "output"
-    elif modbus_trigger_enabled:
-        modbus_mode = "trigger"
-    else:
-        modbus_mode = "off"
     return RuntimeBuildConfig(
         save_dir=cfg.runtime.save_dir,
         history_size=cfg.output.hmi.history_size,
@@ -74,7 +65,8 @@ def build_runtime_config_from_loaded_config(cfg) -> RuntimeBuildConfig:
         http_port=cfg.comm.http.port,
         enable_http=cfg.output.hmi.enabled,
         detect_queue_capacity=cfg.runtime.detect_queue_capacity,
-        modbus_mode=modbus_mode,
+        enable_modbus_trigger=bool(cfg.trigger.modbus.enabled),
+        enable_modbus_output=bool(cfg.output.modbus.enabled),
         modbus_host=cfg.comm.modbus.host,
         modbus_port=cfg.comm.modbus.port,
         coil_offset=cfg.comm.modbus.coil_offset,
@@ -87,49 +79,10 @@ def build_runtime_config_from_loaded_config(cfg) -> RuntimeBuildConfig:
     )
 
 
-class BaseWorker:
-    def __init__(self, name: str = ""):
-        self.name = name or self.__class__.__name__
-        self._stop_evt = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._last_error: Exception | None = None
-
-    def start(self):
-        if self._thread:
-            return
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def stop(self, timeout: float = 2.0):
-        self._stop_evt.set()
-        if self._thread:
-            self._thread.join(timeout=timeout)
-            if self._thread.is_alive():
-                L.warning("%s worker thread did not exit cleanly", self.name)
-
-    def _run(self):
-        try:
-            self.run()
-        except Exception as e:
-            self._last_error = e
-            L.exception("%s worker error", self.name)
-
-    @property
-    def is_alive(self) -> bool:
-        return bool(self._thread and self._thread.is_alive())
-
-    @property
-    def last_error(self) -> Exception | None:
-        return self._last_error
-
-    def run(self):
-        """Override in subclasses with the worker loop."""
-        raise NotImplementedError
-
-
 class TriggerHandle(Protocol):
     def start(self) -> None: ...
     def stop(self) -> None: ...
+    def raise_if_failed(self) -> None: ...
 
 
 class ResultReadApi(Protocol):
@@ -151,7 +104,6 @@ class AppContext:
     trigger_gateway: TriggerGateway
     results: ResultReadApi
     queue_mgr: DetectQueueManager
-    result_sink: Callable[[OutputRecord, Optional[Tuple[bytes, str]]], None]
     modbus_io: Optional["ModbusIO"] = None
 
 
@@ -174,43 +126,60 @@ class SystemRuntime:
         self.triggers: list[TriggerHandle] = []
 
         self._stop_evt = threading.Event()
-        self._heartbeat_stop = threading.Event()
-        self._heartbeat_thread: threading.Thread | None = None
-        self._detect_started = False
-        self._camera_started = False
-        self._camera_session_cm: Any | None = None
-        self._camera_session_entered = False
+        self._camera_session_stack: ExitStack | None = None
+        self._started = False
         self._stopped = False
 
     def start(
         self,
         triggers: Optional[list[TriggerHandle]] = None,
     ):
+        if self._started:
+            raise RuntimeError(
+                "SystemRuntime is single-use; start() may only be called once"
+            )
+        if self._stopped:
+            raise RuntimeError("SystemRuntime is stopped and cannot be started again")
+        self._started = True
         self.triggers = list(triggers or [])
-        self._enter_camera_session()
+        try:
+            self._enter_camera_session()
 
-        self.camera_worker.start()
-        self._camera_started = True
-        self.detect_worker.start()
-        self._detect_started = True
+            self.camera_worker.start()
+            self.detect_worker.start()
 
-        self.output_mgr.start()
-        self._start_heartbeat()
+            self.output_mgr.start()
 
-        for t in list(self.triggers):
-            t.start()
+            for t in list(self.triggers):
+                t.start()
+        except Exception:
+            L.exception("Runtime start failed; rolling back partial startup")
+            try:
+                self.stop()
+            except Exception:
+                L.exception("Runtime rollback stop failed")
+            raise
 
     def request_stop(self):
         self._stop_evt.set()
 
     def run(self, runtime_limit_s: float | None = None):
+        if not self._started:
+            raise RuntimeError("SystemRuntime.run() requires start() first")
         start_ts = time.perf_counter()
+        next_heartbeat_ts = start_ts + 1.0
         try:
             while not self._stop_evt.wait(0.1):
+                now_ts = time.perf_counter()
+                if now_ts >= next_heartbeat_ts:
+                    self.output_mgr.tick()
+                    next_heartbeat_ts = now_ts + 1.0
                 self._raise_if_worker_stopped()
+                self._raise_if_trigger_stopped()
+                self._raise_if_output_stopped()
                 if (
                     runtime_limit_s is not None
-                    and (time.perf_counter() - start_ts) >= runtime_limit_s
+                    and (now_ts - start_ts) >= runtime_limit_s
                 ):
                     L.info(
                         "Runtime limit reached (%ss); shutting down service",
@@ -221,16 +190,27 @@ class SystemRuntime:
             self.stop()
 
     def _raise_if_worker_stopped(self):
-        if self._camera_started and not self.camera_worker.is_alive:
+        if self.camera_worker.has_started and not self.camera_worker.is_alive:
             err = self.camera_worker.last_error
             if err is not None:
-                raise RuntimeError("CameraWorker stopped unexpectedly") from err
+                raise RuntimeError(
+                    f"CameraWorker stopped unexpectedly ({type(err).__name__})"
+                ) from err
             raise RuntimeError("CameraWorker stopped unexpectedly")
-        if self._detect_started and not self.detect_worker.is_alive:
+        if self.detect_worker.has_started and not self.detect_worker.is_alive:
             err = self.detect_worker.last_error
             if err is not None:
-                raise RuntimeError("DetectWorker stopped unexpectedly") from err
+                raise RuntimeError(
+                    f"DetectWorker stopped unexpectedly ({type(err).__name__})"
+                ) from err
             raise RuntimeError("DetectWorker stopped unexpectedly")
+
+    def _raise_if_trigger_stopped(self):
+        for trig in self.triggers:
+            trig.raise_if_failed()
+
+    def _raise_if_output_stopped(self):
+        self.output_mgr.raise_if_failed()
 
     def stop(self):
         if self._stopped:
@@ -245,25 +225,33 @@ class SystemRuntime:
             L.debug("Shutdown stage=%s elapsed=%.1fms", name, (now - stage_t0) * 1000)
             stage_t0 = now
 
-        for t in list(self.triggers):
-            t.stop()
-        _log_stage("triggers")
+        def _run_stage(name: str, fn: Callable[[], None]):
+            try:
+                fn()
+            except Exception:
+                L.exception("Shutdown stage failed: %s", name)
+            finally:
+                _log_stage(name)
 
-        if self._camera_started:
-            self.camera_worker.stop()
-        if self._detect_started:
-            self.detect_worker.stop()
-        self._drain_pending_detects(reason="SERVICE_STOP")
-        _log_stage("workers_and_pending_detects")
+        def _stop_triggers():
+            for t in list(self.triggers):
+                try:
+                    t.stop()
+                except Exception:
+                    L.exception("Trigger stop failed: %r", t)
 
-        self._stop_heartbeat()
-        _log_stage("heartbeat")
-        self.output_mgr.stop()
-        _log_stage("output_manager")
-        self.loop_runner.shutdown_loop()
-        _log_stage("async_loop")
-        self._exit_camera_session()
-        _log_stage("camera_session")
+        def _stop_workers_and_pending():
+            if self.camera_worker.has_started:
+                self.camera_worker.stop()
+            if self.detect_worker.has_started:
+                self.detect_worker.stop()
+            self._drain_pending_detects(reason="SERVICE_STOP")
+
+        _run_stage("triggers", _stop_triggers)
+        _run_stage("workers_and_pending_detects", _stop_workers_and_pending)
+        _run_stage("output_manager", self.output_mgr.stop)
+        _run_stage("async_loop", self.loop_runner.shutdown_loop)
+        _run_stage("camera_session", self._exit_camera_session)
         L.debug(
             "Shutdown stage=total elapsed=%.1fms",
             (time.perf_counter() - stop_t0) * 1000,
@@ -278,11 +266,9 @@ class SystemRuntime:
         modbus_io = self.app_context.modbus_io
         if modbus_io:
             modbus_io.reset_outputs()
-        self.camera_worker.id_manager.reset()
 
     def _drain_pending_detects(self, reason: str = "SERVICE_STOP"):
         q = self.app_context.queue_mgr.queue
-        result_sink = self.app_context.result_sink
 
         def _mark_pending(task):
             now = datetime.now(timezone.utc)
@@ -299,102 +285,79 @@ class SystemRuntime:
                 duration_ms=(time.perf_counter() - task.t0) * 1000,
                 remark=reason.lower(),
             )
-            result_sink(rec, None)
+            self.output_mgr.publish(rec, None)
 
         drain_queue_nowait(q, on_item=_mark_pending)
 
     def _drain_trigger_queue(self):
         drain_queue_nowait(self.app_context.trigger_gateway.trigger_queue)
 
-    def _start_heartbeat(self):
-        if self._heartbeat_thread:
-            return
-        self._heartbeat_stop.clear()
-        self._heartbeat_thread = threading.Thread(
-            target=self._heartbeat_loop, daemon=True
-        )
-        self._heartbeat_thread.start()
-
-    def _stop_heartbeat(self):
-        self._heartbeat_stop.set()
-        thread = self._heartbeat_thread
-        self._heartbeat_thread = None
-        if thread:
-            thread.join(timeout=1.0)
-
-    def _heartbeat_loop(self):
-        while not self._heartbeat_stop.wait(1.0):
-            self.output_mgr.tick()
-
     def _enter_camera_session(self):
-        if self._camera_session_entered:
+        if self._camera_session_stack is not None:
             return
-        cm = self.camera_worker.camera.session()
-        self._camera_session_cm = cm
-        cm.__enter__()
-        self._camera_session_entered = True
+        stack = ExitStack()
+        stack.enter_context(self.camera_worker.camera.session())
+        self._camera_session_stack = stack
 
     def _exit_camera_session(self):
-        if not self._camera_session_entered:
+        stack = self._camera_session_stack
+        if stack is None:
             return
-        cm = self._camera_session_cm
-        if cm is None:
-            raise RuntimeError("camera session context missing during shutdown")
-        self._camera_session_cm = None
-        self._camera_session_entered = False
-        cm.__exit__(None, None, None)
+        self._camera_session_stack = None
+        stack.close()
 
 
-def build_runtime(
-    camera,
-    *,
-    config: RuntimeBuildConfig,
-    detector,
-    trigger_cfg: TriggerConfig | None = None,
-    loop_runner: LoopRunner | None = None,
-):
-    from .worker import (
-        CameraWorker,
-        DetectQueueManager,
-        DetectWorker,
-        GlobalIdManager,
-        make_queue_overflow_record,
-    )
+def _build_trigger_queue() -> queue.Queue:
+    # Trigger events are intentionally kept lightly buffered by default.
+    return queue.Queue(maxsize=DEFAULT_TRIGGER_QUEUE_CAPACITY)
+
+
+def _build_output_manager(cfg: RuntimeBuildConfig, *, loop_runner: LoopRunner):
     from output.manager import OutputManager, ResultStore
 
-    loop_runner = loop_runner or LoopRunner()
-    cfg = config
-    modbus_mode = str(getattr(cfg, "modbus_mode", "off") or "off").strip().lower()
-    if modbus_mode not in {"off", "trigger", "output", "both"}:
-        raise ValueError(
-            "config.modbus_mode must be one of: off, trigger, output, both"
-        )
-    modbus_io_enabled = modbus_mode in {"trigger", "output", "both"}
-    modbus_output_enabled = modbus_mode in {"output", "both"}
-    # Trigger events are intentionally kept lightly buffered by default (2-slot queue).
-    trigger_queue_capacity = DEFAULT_TRIGGER_QUEUE_CAPACITY
-    detect_queue_capacity = max(1, int(cfg.detect_queue_capacity))
-    trigger_queue: queue.Queue = queue.Queue(maxsize=trigger_queue_capacity)
-    id_mgr = GlobalIdManager()
     result_store = ResultStore(
-        base_dir=cfg.save_dir, max_records=cfg.history_size, write_csv=cfg.write_csv
+        base_dir=cfg.save_dir,
+        max_records=cfg.history_size,
+        write_csv=cfg.write_csv,
     )
-    output_mgr = OutputManager(result_store, loop_runner=loop_runner)
-    queue_mgr = DetectQueueManager(maxsize=detect_queue_capacity)
-    if detector is None:
-        raise ValueError("detector is required")
-    trigger_cfg = trigger_cfg or TriggerConfig()
+    return OutputManager(result_store, loop_runner=loop_runner)
+
+
+def _build_detect_queue_manager(
+    cfg: RuntimeBuildConfig,
+    *,
+    output_mgr_publish: Callable[[OutputRecord, Optional[Tuple[bytes, str]]], None],
+):
+    from .worker import DetectQueueManager
+
+    return DetectQueueManager(
+        maxsize=max(1, int(cfg.detect_queue_capacity)),
+        result_sink=output_mgr_publish,
+    )
+
+
+def _build_app_context(
+    cfg: RuntimeBuildConfig,
+    *,
+    trigger_cfg: TriggerConfig,
+    trigger_queue: queue.Queue,
+    queue_mgr,
+    output_mgr,
+    make_queue_overflow_record_fn,
+) -> AppContext:
     ip_whitelist = set(trigger_cfg.ip_whitelist) if trigger_cfg.ip_whitelist else None
 
     def on_trigger_overflow(dropped_event):
-        """Record NG for triggers dropped before acquisition."""
+        """Record ERROR for triggers dropped before acquisition."""
         now_dt = datetime.now(timezone.utc)
         source = dropped_event.source
         triggered_at = dropped_event.triggered_at or now_dt
         t0_val = dropped_event.monotonic_ms
         t0 = (t0_val / 1000.0) if isinstance(t0_val, (int, float)) else None
-        frame_id = dropped_event.trigger_seq or id_mgr.next_id()
-        rec = make_queue_overflow_record(
+        frame_id = int(getattr(dropped_event, "trigger_seq", 0) or 0)
+        if frame_id <= 0:
+            raise RuntimeError("Trigger overflow event missing trigger_seq")
+        rec = make_queue_overflow_record_fn(
             frame_id=frame_id,
             source=source,
             device_id="",
@@ -406,7 +369,7 @@ def build_runtime(
         )
         output_mgr.publish(rec, None)
 
-    app_context = AppContext(
+    return AppContext(
         trigger_gateway=TriggerGateway(
             trigger_queue,
             debounce_ms=cfg.debounce_ms,
@@ -421,24 +384,36 @@ def build_runtime(
         ),
         results=output_mgr,
         queue_mgr=queue_mgr,
-        result_sink=output_mgr.publish,
     )
 
+
+def _wire_output_channels(
+    cfg: RuntimeBuildConfig,
+    *,
+    app_context: AppContext,
+    output_mgr,
+    loop_runner: LoopRunner,
+):
+    modbus_io_enabled = bool(cfg.enable_modbus_trigger or cfg.enable_modbus_output)
+    modbus_output_enabled = bool(cfg.enable_modbus_output)
     modbus_io = None
+
     if cfg.enable_http:
         from output.hmi import HmiOutput
 
         project_root = os.path.dirname(os.path.dirname(__file__))
         index_path = os.path.join(project_root, "output", "web", "index.html")
-        hmi_output = HmiOutput(
-            cfg.http_host,
-            cfg.http_port,
-            app_context,
-            index_path=index_path,
-            task_reg=output_mgr.adopt_task,
-            loop_runner=loop_runner,
+        output_mgr.add_channel(
+            HmiOutput(
+                cfg.http_host,
+                cfg.http_port,
+                app_context,
+                index_path=index_path,
+                task_reg=output_mgr.adopt_task,
+                loop_runner=loop_runner,
+            )
         )
-        output_mgr.add_channel(hmi_output)
+
     if modbus_io_enabled:
         from core.modbus_io import ModbusIO
 
@@ -452,20 +427,82 @@ def build_runtime(
             task_reg=output_mgr.adopt_task,
             loop_runner=loop_runner,
         )
+
     if modbus_output_enabled and modbus_io:
         from output.modbus import ModbusOutput
 
-        modbus_output = ModbusOutput(modbus_io)
-        output_mgr.add_channel(modbus_output)
+        output_mgr.add_channel(ModbusOutput(modbus_io))
+
+    return modbus_io
+
+
+def _build_workers(
+    camera,
+    *,
+    detector,
+    trigger_queue: queue.Queue,
+    queue_mgr,
+    output_mgr_publish: Callable[[OutputRecord, Optional[Tuple[bytes, str]]], None],
+    detect_timeout_ms: int,
+    preview_enabled: bool,
+):
+    from .worker import CameraWorker, DetectWorker
 
     camera_worker = CameraWorker(
-        camera, id_mgr, trigger_queue, queue_mgr, result_sink=output_mgr.publish
+        camera,
+        trigger_queue,
+        queue_mgr,
+        result_sink=output_mgr_publish,
     )
     detect_worker = DetectWorker(
         queue_mgr,
-        result_sink=output_mgr.publish,
+        result_sink=output_mgr_publish,
         detector=detector,
-        timeout_ms=cfg.detect_timeout_ms,
+        timeout_ms=detect_timeout_ms,
+        preview_enabled=preview_enabled,
+    )
+    return camera_worker, detect_worker
+
+
+def build_runtime(
+    camera,
+    *,
+    config: RuntimeBuildConfig,
+    detector,
+    trigger_cfg: TriggerConfig | None = None,
+    loop_runner: LoopRunner | None = None,
+):
+    from .worker import make_queue_overflow_record
+
+    loop_runner = loop_runner or LoopRunner()
+    cfg = config
+    if detector is None:
+        raise ValueError("detector is required")
+    trigger_cfg = trigger_cfg or TriggerConfig()
+    trigger_queue = _build_trigger_queue()
+    output_mgr = _build_output_manager(cfg, loop_runner=loop_runner)
+    queue_mgr = _build_detect_queue_manager(cfg, output_mgr_publish=output_mgr.publish)
+    app_context = _build_app_context(
+        cfg,
+        trigger_cfg=trigger_cfg,
+        trigger_queue=trigger_queue,
+        queue_mgr=queue_mgr,
+        output_mgr=output_mgr,
+        make_queue_overflow_record_fn=make_queue_overflow_record,
+    )
+    modbus_io = _wire_output_channels(
+        cfg,
+        app_context=app_context,
+        output_mgr=output_mgr,
+        loop_runner=loop_runner,
+    )
+    camera_worker, detect_worker = _build_workers(
+        camera,
+        detector=detector,
+        trigger_queue=trigger_queue,
+        queue_mgr=queue_mgr,
+        output_mgr_publish=output_mgr.publish,
+        detect_timeout_ms=cfg.detect_timeout_ms,
         preview_enabled=cfg.preview_enabled,
     )
     runtime = SystemRuntime(
@@ -499,7 +536,6 @@ def build_runtime_from_loaded_config(
 
 
 __all__ = [
-    "BaseWorker",
     "AppContext",
     "ResultReadApi",
     "RuntimeBuildConfig",

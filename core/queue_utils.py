@@ -14,8 +14,8 @@ def drain_queue_nowait(
 ) -> int:
     """Drain all currently queued items without blocking.
 
-    Calls `task_done()` for each popped item (errors suppressed), which keeps queue
-    counters consistent during shutdown/reset cleanup flows.
+    Calls `task_done()` for each popped item, which keeps queue counters consistent
+    during shutdown/reset cleanup flows.
     """
     drained = 0
     while True:

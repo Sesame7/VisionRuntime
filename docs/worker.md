@@ -11,13 +11,13 @@
 - `CameraWorker`: pulls triggers, grabs frames, enqueues detect tasks.
 - `DetectWorker`: consumes detect tasks, runs detector, emits results.
 - `DetectQueueManager`: queue + DropHead policy (drop oldest on full).
-- `GlobalIdManager`: monotonic trigger ID that resets daily.
+- `BaseWorker`: shared worker thread lifecycle wrapper (implemented in `core/worker.py`).
 
 ## 3. Flow (Simplified)
 
 1) Trigger arrives → `CameraWorker` captures once  
 2) Build `AcqTask` → enqueue into `DetectQueueManager`  
-3) `DetectWorker` runs detector → `_to_output_record`  
+3) `DetectWorker` runs detector → build `OutputRecord`  
 4) Optional preview encoding → `OutputManager.publish`
 
 ## 4. Drop Strategy
@@ -32,5 +32,7 @@
 
 ## 6. Notes
 
-- Workers are single-threaded and rely on `BaseWorker` from `core/runtime`.
+- Workers are single-threaded and rely on `BaseWorker` in `core/worker.py`.
+- `trigger_seq` comes from `TriggerGateway` (no worker-side global ID allocator).
+- Detector/publish/preview-encode exceptions currently follow fail-fast semantics (the worker thread exits and runtime stops).
 - No backpressure beyond the Camera→Detect queue.

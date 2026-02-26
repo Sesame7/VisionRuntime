@@ -100,5 +100,5 @@
 
 - Data contracts/channels/time semantics: `core/contracts` is the single source of truth.  
 - Backpressure and queues: Detect→Output has no queue. Current runtime also uses a bounded trigger queue before CameraWorker (default capacity `2`, internal parameter, not YAML-configurable yet); `runtime.detect_queue_capacity` controls the Camera→Detect queue.  
-- Async boundary: config contains only business parameters like network/timeouts/retries; threading/loop/shutdown strategy is uniformly managed by `SystemRuntime` in `core/runtime`.  
+- Async boundary: config contains only business parameters like network/timeouts/retries; threading/loop/shutdown strategy is uniformly managed by `SystemRuntime` (`core/runtime.py`) and shared loop helpers in `core/lifecycle.py`.  
 - Trigger/Camera/Detect/Output read their own config blocks and do not parse other modules’ fields.

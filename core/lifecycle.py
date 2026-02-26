@@ -16,6 +16,38 @@ L = logging.getLogger("vision_runtime.runtime")
 T = TypeVar("T")
 
 
+async def _run_named_task(coro: Coroutine[Any, Any, T], *, task_name: str | None) -> T:
+    if task_name:
+        task = asyncio.current_task()
+        if task is not None:
+            try:
+                task.set_name(task_name)
+            except Exception:
+                pass
+    return await coro
+
+
+def _task_debug_label(task: asyncio.Task[Any]) -> str:
+    name = ""
+    try:
+        name = task.get_name() or ""
+    except Exception:
+        name = ""
+    coro_name = ""
+    try:
+        coro = task.get_coro()
+        coro_name = getattr(coro, "__qualname__", "") or getattr(coro, "__name__", "")
+    except Exception:
+        coro_name = ""
+    if name and coro_name:
+        return f"{name}({coro_name})"
+    if name:
+        return name
+    if coro_name:
+        return coro_name
+    return repr(task)
+
+
 class LoopRunner:
     """Owns a shared background asyncio loop and provides sync bridge helpers."""
 
@@ -72,15 +104,28 @@ class LoopRunner:
             self._logger.warning("run_async timeout after %.2fs", timeout or 0)
             raise
 
-    def spawn_background_task(self, coro: Coroutine[Any, Any, Any]):
+    def spawn_background_task(
+        self, coro: Coroutine[Any, Any, Any], *, task_name: str | None = None
+    ):
         """Fire-and-forget task on the shared loop; returns the task/future handle."""
         loop = self._ensure_loop()
+        wrapped = _run_named_task(coro, task_name=task_name) if task_name else coro
         if (
             self._loop_thread_ident is not None
             and threading.get_ident() == self._loop_thread_ident
         ):
-            return loop.create_task(coro)
-        return asyncio.run_coroutine_threadsafe(coro, loop)
+            if task_name:
+                try:
+                    return loop.create_task(wrapped, name=task_name)
+                except TypeError:
+                    task = loop.create_task(wrapped)
+                    try:
+                        task.set_name(task_name)
+                    except Exception:
+                        pass
+                    return task
+            return loop.create_task(wrapped)
+        return asyncio.run_coroutine_threadsafe(wrapped, loop)
 
     def shutdown_loop(self, timeout: float = 1.0):
         """Cancel pending tasks and stop the shared loop."""
@@ -106,11 +151,11 @@ class LoopRunner:
                 t for t in asyncio.all_tasks() if t is not current and not t.done()
             ]
             if tasks:
-                names = [t.get_name() or repr(t) for t in tasks[:10]]
+                names = [_task_debug_label(t) for t in tasks[:10]]
                 suffix = ""
                 if len(tasks) > 10:
                     suffix = f" (+{len(tasks) - 10} more)"
-                self._logger.info(
+                self._logger.debug(
                     "shutdown_loop pending_tasks=%d names=%s%s",
                     len(tasks),
                     ", ".join(names),
@@ -135,6 +180,12 @@ class LoopRunner:
         finally:
             if thread.is_alive():
                 thread.join(timeout=timeout)
+            if thread.is_alive():
+                self._logger.warning(
+                    "shutdown_loop thread did not exit within %.2fs; loop not closed",
+                    timeout,
+                )
+                return
             if not loop.is_closed():
                 loop.close()
             self._loop = None
@@ -159,9 +210,12 @@ class AsyncTaskOwner:
         self._owner_name = owner_name
         self._loop_runner = loop_runner
         self._local_tasks: list[Any] = []
+        self._spawn_seq = 0
 
     def spawn(self, coro: Coroutine[Any, Any, Any]):
-        task = self._loop_runner.spawn_background_task(coro)
+        self._spawn_seq += 1
+        task_name = f"{self._owner_name}.{self._spawn_seq}"
+        task = self._loop_runner.spawn_background_task(coro, task_name=task_name)
         return self.register(task)
 
     def register(self, task: Any):

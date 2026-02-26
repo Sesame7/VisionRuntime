@@ -14,7 +14,7 @@
 - OutputRecord fields, time semantics, and channel conventions use `core/contracts` as the single source of truth and are not repeated here. The pipeline converts detection output into OutputRecord before fan-out.
 - Input validation: dtype/channel (mono8/bgr8), dimensions, ROI bounds are detector responsibilities.
 - Result constraints: top-level keys are fixed; extensions go into `data`. Plugins must not modify `trigger_seq/source/device_id`.
-- Exceptions/timeouts: exceptions are caught by `DetectWorker` and converted to `ok=False` with an error message; timeouts are evaluated in the worker based on elapsed detect time.
+- Exceptions/timeouts: the worker classifies elapsed detect time as `TIMEOUT`, but detector/preview-encode/publish exceptions currently follow fail-fast semantics (the `DetectWorker` thread exits and runtime health checks stop the service).
 
 ## 3. Preview and Overlay
 

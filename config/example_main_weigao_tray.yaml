@@ -38,6 +38,8 @@ trigger:
   debounce_ms: 10.0
   global_min_interval_ms: 0
   high_priority_cooldown_ms: 0
+  # These three fields must be YAML lists of strings (not a single string).
+  # Empty list disables priority filtering / whitelist checks.
   high_priority_sources: []
   low_priority_sources: []
   ip_whitelist: []
