@@ -37,6 +37,9 @@ class BaseTrigger(ABC):
     def stop(self):
         pass
 
+    def raise_if_failed(self):
+        return None
+
     def __enter__(self):
         self.start()
         return self

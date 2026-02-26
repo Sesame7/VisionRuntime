@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from aiohttp import web
 import os
 
-from core.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
+from core.lifecycle import LoopRunner, run_async_cleanup
 from datetime import datetime, timezone
 from core.contracts import OutputRecord
 
@@ -44,13 +44,10 @@ class _ApiServer:
         self.app = web.Application()
         self._setup_routes()
         self._runner = None
+        self._site = None
         self._started = False
-        self._tasks = AsyncTaskOwner(
-            task_reg=task_reg,
-            logger=L,
-            owner_name="hmi_api_server",
-            loop_runner=loop_runner,
-        )
+        self._loop_runner = loop_runner
+        _ = task_reg
 
     def _setup_routes(self):
         app = self.app
@@ -126,31 +123,48 @@ class _ApiServer:
     def start(self):
         if self._started:
             return
-        L.info("HMI web service running @ http://%s:%d", self.host, self.port)
-        self._tasks.spawn(self._serve())
+        try:
+            self._loop_runner.run_async(self._serve(), timeout=1.0)
+        except Exception:
+            self.stop()
+            raise
         self._started = True
 
     async def _serve(self):
         self._runner = web.AppRunner(self.app, access_log=None)
         await self._runner.setup()
-        site = web.TCPSite(self._runner, self.host, self.port)
-        await site.start()
+        self._site = web.TCPSite(self._runner, self.host, self.port)
+        await self._site.start()
+        L.info("HMI web service running @ http://%s:%d", self.host, self.port)
 
     def stop(self):
-        self._tasks.cancel_and_clear_local_tasks()
-
         async def _cleanup():
             if self._runner:
                 await self._runner.cleanup()
             self._runner = None
+            self._site = None
 
         run_async_cleanup(
             _cleanup(),
             timeout=0.5,
-            loop_runner=self._tasks.loop_runner,
+            loop_runner=self._loop_runner,
         )
         self._started = False
         L.info("HMI web service stopped")
+
+    def raise_if_failed(self):
+        if not self._started:
+            return
+        runner = self._runner
+        site = self._site
+        if runner is None or site is None:
+            raise RuntimeError("HMI web service stopped unexpectedly")
+        server = getattr(site, "_server", None)
+        if server is None:
+            raise RuntimeError("HMI web service server missing")
+        is_serving = getattr(server, "is_serving", None)
+        if callable(is_serving) and not bool(is_serving()):
+            raise RuntimeError("HMI web service is not serving")
 
 
 class HmiOutput:
@@ -188,3 +202,6 @@ class HmiOutput:
         # Heartbeat is served via /status; no push needed.
         _ = ts
         return None
+
+    def raise_if_failed(self):
+        self.server.raise_if_failed()

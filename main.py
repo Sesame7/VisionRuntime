@@ -80,13 +80,19 @@ def main():
     if not args.verbose and not args.log_level:
         setup_logging(args.verbose, cfg.runtime.log_level)
 
-    runtime, triggers, runtime_limit_s = build_app(cfg)
+    runtime = None
 
     try:
+        runtime, triggers, runtime_limit_s = build_app(cfg)
         runtime.start(triggers=triggers)
         runtime.run(runtime_limit_s=runtime_limit_s)
         logging.info("Done")
     except KeyboardInterrupt:
+        if runtime is not None:
+            try:
+                runtime.stop()
+            except Exception:
+                logging.exception("Runtime stop failed during Ctrl+C handling")
         logging.info("Service STOPPED by user (Ctrl+C)")
 
 
@@ -126,7 +132,7 @@ def _build_runtime_triggers(cfg, runtime, trigger_cfg):
     if cfg.trigger.modbus.enabled:
         modbus_io = runtime.app_context.modbus_io
         if modbus_io is None:
-            logging.error("Modbus trigger enabled but ModbusIO is not available")
+            raise RuntimeError("Modbus trigger enabled but ModbusIO is not available")
         else:
 
             def on_modbus_trigger(_src):

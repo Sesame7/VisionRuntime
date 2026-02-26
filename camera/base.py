@@ -1,7 +1,6 @@
 # -- coding: utf-8 --
 
 import os
-import threading
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -87,7 +86,6 @@ def _normalize_pixel_format(value: object) -> str:
 class BaseCamera(ABC):
     def __init__(self, cfg: CameraConfig):
         self.cfg = cfg
-        self.lock = threading.Lock()
 
     @abstractmethod
     def capture_once(self, idx, triggered_at: datetime | None = None) -> CaptureResult:

@@ -1,6 +1,7 @@
 # -- coding: utf-8 --
 
 import asyncio
+from concurrent.futures import CancelledError as FutureCancelledError
 import logging
 
 from core.lifecycle import AsyncTaskOwner, LoopRunner
@@ -33,11 +34,13 @@ class ModbusTrigger(BaseTrigger):
         self._task = None
         self._last_cmd_trig = None
         self._last_cmd_reset = None
+        self._last_error = None
 
     def start(self):
         if self._task:
             return
         self._tasks.clear_local_tasks()
+        self._last_error = None
         self._task = self._tasks.spawn(self._poll_loop())
 
     def stop(self):
@@ -48,26 +51,67 @@ class ModbusTrigger(BaseTrigger):
         self._tasks.cancel_and_clear_local_tasks()
         L.info("Modbus trigger stopped")
 
+    def raise_if_failed(self):
+        task = self._task
+        if task is None or not hasattr(task, "done") or not task.done():
+            return
+        try:
+            err = task.exception()
+        except FutureCancelledError:
+            return
+        if err is None:
+            return
+        raise RuntimeError(
+            f"ModbusTrigger stopped unexpectedly ({type(err).__name__})"
+        ) from err
+
     async def _poll_loop(self):
         interval_s = max(self._poll_ms, 5) / 1000.0
-        while True:
-            await asyncio.sleep(interval_s)
-            cmds = self._io.read_coils(0, 2)
-            trig_val, reset_val = int(cmds[0]), int(cmds[1])
-            last_trig = self._last_cmd_trig
-            last_reset = self._last_cmd_reset
-            if last_trig is None:
-                self._last_cmd_trig = trig_val
-                self._last_cmd_reset = reset_val
-                continue
+        try:
+            while True:
+                await asyncio.sleep(interval_s)
+                try:
+                    cmds = self._io.read_coils(0, 2)
+                    trig_val, reset_val = int(cmds[0]), int(cmds[1])
+                except Exception as exc:
+                    raise RuntimeError(
+                        "ModbusTrigger poll failed stage=read_coils"
+                    ) from exc
+                last_trig = self._last_cmd_trig
+                last_reset = self._last_cmd_reset
+                if last_trig is None:
+                    self._last_cmd_trig = trig_val
+                    self._last_cmd_reset = reset_val
+                    continue
 
-            if trig_val != last_trig:
-                self._last_cmd_trig = trig_val
-                accepted = bool(self.on_trigger("MODBUS"))
-                if accepted:
-                    self._io.toggle_di(1)  # ST_ACCEPT_TOGGLE
+                if trig_val != last_trig:
+                    self._last_cmd_trig = trig_val
+                    try:
+                        accepted = bool(self.on_trigger("MODBUS"))
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "ModbusTrigger poll failed stage=on_trigger"
+                        ) from exc
+                    if accepted:
+                        try:
+                            self._io.toggle_di(1)  # ST_ACCEPT_TOGGLE
+                        except Exception as exc:
+                            raise RuntimeError(
+                                "ModbusTrigger poll failed stage=toggle_di"
+                            ) from exc
 
-            if reset_val != last_reset:
-                self._last_cmd_reset = reset_val
-                if self._on_reset:
-                    self._on_reset()
+                if reset_val != last_reset:
+                    self._last_cmd_reset = reset_val
+                    if self._on_reset:
+                        try:
+                            self._on_reset()
+                        except Exception as exc:
+                            raise RuntimeError(
+                                "ModbusTrigger poll failed stage=on_reset"
+                            ) from exc
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._last_error = exc
+            L.exception("Modbus trigger poll loop failed")
+            raise

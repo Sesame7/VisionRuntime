@@ -84,25 +84,29 @@ class RaspiCamera(BaseCamera):
 
     @contextmanager
     def session(self):
-        self._cam = Picamera2()
-        main_cfg: dict[str, object] = {"format": "XBGR8888"}
-        if self.cfg.width and self.cfg.height:
-            main_cfg["size"] = (int(self.cfg.width), int(self.cfg.height))
-        if self.cfg.use_still:
-            cfg = self._cam.create_still_configuration(main=main_cfg)
-        else:
-            cfg = self._cam.create_preview_configuration(main=main_cfg)
-        self._cam.configure(cfg)
-        self._cam.start_preview(Preview.NULL)
-        self._cam.start()
-        self._apply_controls()
+        cam = Picamera2()
+        self._cam = cam
+        started = False
         try:
+            main_cfg: dict[str, object] = {"format": "XBGR8888"}
+            if self.cfg.width and self.cfg.height:
+                main_cfg["size"] = (int(self.cfg.width), int(self.cfg.height))
+            if self.cfg.use_still:
+                cfg = cam.create_still_configuration(main=main_cfg)
+            else:
+                cfg = cam.create_preview_configuration(main=main_cfg)
+            cam.configure(cfg)
+            cam.start_preview(Preview.NULL)
+            cam.start()
+            started = True
+            self._apply_controls()
             yield
         finally:
             try:
-                self._cam.stop()
+                if started:
+                    cam.stop()
             finally:
-                self._cam.close()
+                cam.close()
                 self._cam = None
 
 

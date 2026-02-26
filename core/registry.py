@@ -1,16 +1,25 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from collections.abc import MutableMapping
 from typing import TypeVar
 
 T = TypeVar("T")
+L = logging.getLogger("vision_runtime.registry")
 
 
 def register_named(registry: MutableMapping[str, T], name: str):
     """Decorator to register an object under a string key."""
 
     def decorator(obj: T) -> T:
+        if name in registry:
+            L.warning(
+                "Overwriting registry key '%s' (old=%r new=%r)",
+                name,
+                registry[name],
+                obj,
+            )
         registry[name] = obj
         return obj
 

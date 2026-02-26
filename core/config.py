@@ -209,6 +209,11 @@ def validate_config(cfg: LoadedConfig) -> None:
         cfg.trigger.high_priority_cooldown_ms,
         min_v=0.0,
     )
+    _require_str_list(
+        "trigger.high_priority_sources", cfg.trigger.high_priority_sources
+    )
+    _require_str_list("trigger.low_priority_sources", cfg.trigger.low_priority_sources)
+    _require_str_list("trigger.ip_whitelist", cfg.trigger.ip_whitelist)
     _require_int("trigger.modbus.poll_ms", cfg.trigger.modbus.poll_ms, min_v=1)
 
     # comm
@@ -469,6 +474,15 @@ def _require_float(
 
 def _require_port(name: str, value: Any) -> int:
     return _require_int(name, value, min_v=1, max_v=65535)
+
+
+def _require_str_list(name: str, value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise ConfigError(f"{name} must be a list of strings")
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            raise ConfigError(f"{name}[{i}] must be a string")
+    return value
 
 
 __all__ = [

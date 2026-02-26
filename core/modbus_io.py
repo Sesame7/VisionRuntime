@@ -52,8 +52,13 @@ class ModbusIO:
         self.di_offset = max(int(di_offset), 0)
         self.ir_offset = max(int(ir_offset), 0)
         self.heartbeat_ms = max(int(heartbeat_ms), 100)
+        self._state_lock = threading.Lock()
         self._lock = threading.Lock()
+        self._started = False
         self._server: ModbusTcpServerType | None = None
+        self._serve_task = None
+        self._heartbeat_task = None
+        self._heartbeat_stop = threading.Event()
         self._tasks = AsyncTaskOwner(
             task_reg=task_reg,
             logger=L,
@@ -75,14 +80,36 @@ class ModbusIO:
         self._context = build_server_context(self._device_ctx)
 
     def start(self):
-        if self._server:
-            return
-        L.info("Modbus TCP server listening on %s:%d", self.host, self.port)
-        self._tasks.cancel_and_clear_local_tasks()
-        self._tasks.spawn(self._serve())
-        self._tasks.spawn(self._heartbeat_loop())
+        with self._state_lock:
+            if self._started:
+                return
+            self._started = True
+            self._heartbeat_stop.clear()
+            try:
+                self._tasks.cancel_and_clear_local_tasks()
+                self._serve_task = self._tasks.spawn(self._serve())
+                self._heartbeat_task = self._tasks.spawn(self._heartbeat_loop())
+            except Exception:
+                self._started = False
+                self._serve_task = None
+                self._heartbeat_task = None
+                self._heartbeat_stop.set()
+                raise
 
     def stop(self):
+        with self._state_lock:
+            if not self._started and self._server is None:
+                return
+            self._started = False
+            self._heartbeat_stop.set()
+            serve_task = self._serve_task
+            heartbeat_task = self._heartbeat_task
+            self._serve_task = None
+            self._heartbeat_task = None
+        for task in (serve_task, heartbeat_task):
+            if task is not None:
+                task.cancel()
+
         async def _cleanup():
             # Tasks successfully registered via task_reg are owned/cancelled by the
             # external manager (OutputManager). Only local fallback tasks are
@@ -139,15 +166,21 @@ class ModbusIO:
     async def _serve(self):
         server = ModbusTcpServer(self._context, address=(self.host, self.port))
         self._server = server
+        L.info("Modbus TCP server listening on %s:%d", self.host, self.port)
         try:
             await server.serve_forever()
         except asyncio.CancelledError:
             return
+        finally:
+            if self._server is server:
+                self._server = None
 
     async def _heartbeat_loop(self):
         interval_s = max(self.heartbeat_ms, 100) / 1000.0
-        while True:
+        while not self._heartbeat_stop.is_set():
             await asyncio.sleep(interval_s)
+            if self._heartbeat_stop.is_set():
+                break
             with self._lock:
                 self._toggle_di_locked(0)  # ST_HEARTBEAT_TOGGLE
 

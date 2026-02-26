@@ -15,9 +15,9 @@ body { margin:0; padding:0; font-family:Arial, sans-serif; background:#111; colo
 .left img { max-width:100%; max-height:100%; object-fit:contain; background:#000; }
 .right { width:430px; padding:8px; display:flex; flex-direction:column; gap:8px; }
 .panel { background:var(--panel); border:1px solid var(--panel-border); border-radius:8px; padding:8px; }
-.btn { display:inline-block; padding:10px 16px; min-width:110px; margin-right:6px; background:#2d7efc; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
-.btn-row { display:flex; gap:12px; align-items:center; justify-content:space-between; }
-.head-meta { display:flex; flex-direction:column; gap:6px; }
+  .btn { display:inline-block; padding:10px 16px; min-width:110px; margin-right:6px; background:#2d7efc; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
+  .btn-row { display:flex; gap:12px; align-items:center; justify-content:space-between; }
+  .head-meta { display:flex; flex-direction:column; gap:6px; }
 .table-wrap { flex:1; overflow:auto; }
 table { width:100%; border-collapse:collapse; font-size:13px; }
 th, td { padding:6px 8px; text-align:left; border-bottom:1px solid #333; }
@@ -89,6 +89,8 @@ th { position:sticky; top:0; background:var(--panel-strong); }
 const REFRESH_MS = 1000;
 const HEARTBEAT_STALE_POLLS = 3;
 const ID_PAD_LEN = 5;
+const STATUS_TIMEOUT_MS = 1200;
+const TRIGGER_TIMEOUT_MS = 1500;
 
 const els = {
   img: document.getElementById('img'),
@@ -105,7 +107,29 @@ const els = {
   tbody: document.querySelector('#records tbody'),
 };
 
-async function doTrigger(){ await fetch('/trigger',{method:'POST'}); }
+let refreshInFlight = false;
+
+async function fetchWithTimeout(url, options, timeoutMs){
+  const ctrl = new AbortController();
+  const timer = setTimeout(function(){ ctrl.abort(); }, timeoutMs);
+  try{
+    return await fetch(url, {...(options || {}), signal: ctrl.signal});
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function doTrigger(){
+  try{
+    const r = await fetchWithTimeout('/trigger', {method:'POST'}, TRIGGER_TIMEOUT_MS);
+    if (!r.ok){
+      throw new Error(`trigger_http_${r.status}`);
+    }
+    try { await r.json(); } catch(_e) {}
+  } catch(e){
+    console.error(e);
+  }
+}
 let lastImgId = null;
 let lastHeartbeatSeq = null;
 let hasHeartbeatProgress = false;
@@ -189,8 +213,14 @@ function tickClock(){
 }
 
 async function refresh(){
+  if (refreshInFlight) return;
+  refreshInFlight = true;
   try{
-    const r=await fetch('/status'); const d=await r.json();
+    const r = await fetchWithTimeout('/status', {}, STATUS_TIMEOUT_MS);
+    if (!r.ok){
+      throw new Error(`status_http_${r.status}`);
+    }
+    const d = await r.json();
     els.statusTime.innerText = 'Idle';
     els.statusTime.className = 'status-time';
     const recs = d.records || [];
@@ -218,12 +248,15 @@ async function refresh(){
     els.statusTime.className = 'status-time';
     staleHeartbeatPolls += 1;
     renderOnline(hasHeartbeatProgress && staleHeartbeatPolls < HEARTBEAT_STALE_POLLS ? 'ok' : 'ng');
+  } finally {
+    refreshInFlight = false;
   }
 }
 setInterval(tickClock, REFRESH_MS);
 setInterval(refresh, REFRESH_MS);
+window.addEventListener('focus', function(){ void refresh(); });
 tickClock();
-refresh();
+void refresh();
 </script>
 </body>
 </html>

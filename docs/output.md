@@ -11,7 +11,7 @@
 
 ## 2. Interfaces and Responsibilities
 
-- `OutputChannel`: `start()/stop()` manage resources; `publish(rec, overlay)` is a synchronous entry (`overlay` may be `None`). Any IO inside the channel must be made asynchronous by the channel itself (prefer helpers from `core/runtime` such as `spawn_background_task` or `run_async`). A channel must not call `shutdown_loop`.
+- `OutputChannel`: `start()/stop()` manage resources; `publish(rec, overlay)` is a synchronous entry (`overlay` may be `None`). Any IO inside the channel must be made asynchronous by the channel itself (prefer helpers from `core/lifecycle.py` such as `spawn_background_task` or `run_async`). A channel must not call `shutdown_loop`. Channels may optionally expose `raise_if_failed()` for runtime health checks.
 - Optional: `publish_heartbeat(ts)` to expose an online heartbeat (e.g., toggle Modbus bit or update HMI indicator).
 - `OutputManager`: holds the channel list and fans out results. In-memory history/stats/latest preview are maintained by `ResultStore` (which `OutputManager` proxies to HMI/Modbus readers). On `publish`, it stores first, then calls channels in order; exceptions must not block later channels. Track fire-and-forget tasks created by channels; on `stop()`, cancel/await them before returning.
 

@@ -40,6 +40,9 @@ class ModbusOutput:
         _ = ts
         return None
 
+    def raise_if_failed(self):
+        return None
+
 
 def _saturate_u16(value: float | int | None) -> int:
     if value is None:

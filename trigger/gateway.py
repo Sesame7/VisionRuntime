@@ -44,6 +44,8 @@ class TriggerGateway:
         remote_ip: object | None = None,
     ) -> bool:
         now = time.perf_counter()
+        dropped = None
+        did_overflow = False
         with self._lock:
             if self.ip_whitelist is not None and source in NETWORK_WHITELIST_SOURCES:
                 remote_ip_str = self._normalize_ip(remote_ip)
@@ -71,37 +73,41 @@ class TriggerGateway:
                 )
                 return False
 
-            self.last_accept_ts = now
-            if source in self.high_priority_sources:
-                self._last_high_pri_ts = now
-
-            self._seq += 1
+            next_seq = self._seq + 1
             event = TriggerEvent(
-                trigger_seq=self._seq,
+                trigger_seq=next_seq,
                 source=source,
                 triggered_at=datetime.now(timezone.utc),
                 monotonic_ms=int(now * 1000),
                 payload=payload,
             )
-        try:
-            self.trigger_queue.put_nowait(event)
-            return True
-        except queue.Full:
-            try:
-                dropped = self.trigger_queue.get_nowait()
-            except queue.Empty:
-                dropped = None
-            if dropped is not None:
-                self.trigger_queue.task_done()
-            L.warning("Trigger queue full, dropping oldest and accepting %s", source)
-            if dropped and self.on_overflow:
-                self.on_overflow(dropped)
+
             try:
                 self.trigger_queue.put_nowait(event)
-                return True
             except queue.Full:
-                L.warning("Trigger queue still full, drop %s", source)
-            return False
+                did_overflow = True
+                try:
+                    dropped = self.trigger_queue.get_nowait()
+                except queue.Empty:
+                    dropped = None
+                if dropped is not None:
+                    self.trigger_queue.task_done()
+                if dropped and self.on_overflow:
+                    self.on_overflow(dropped)
+                try:
+                    self.trigger_queue.put_nowait(event)
+                except queue.Full:
+                    L.warning("Trigger queue still full, drop %s", source)
+                    return False
+
+            self._seq = next_seq
+            self.last_accept_ts = now
+            if source in self.high_priority_sources:
+                self._last_high_pri_ts = now
+
+        if did_overflow:
+            L.warning("Trigger queue full, dropping oldest and accepting %s", source)
+        return True
 
     def _is_low_priority_blocked(self, now: float, source: str) -> bool:
         if not self.high_priority_sources or self.high_priority_cooldown_ms <= 0:
