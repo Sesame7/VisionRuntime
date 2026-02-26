@@ -8,12 +8,12 @@ import numpy as np
 from .base import register_detector
 
 
-def _clamp_int(v: Any, lo: int, hi: int) -> int:
+def _round_and_clamp_int(v: Any, lo: int, hi: int) -> int:
     x = int(round(float(v)))
     return lo if x < lo else hi if x > hi else x
 
 
-def _h_in_range(h: np.ndarray, lo: int, hi: int) -> np.ndarray:
+def _hue_in_range(h: np.ndarray, lo: int, hi: int) -> np.ndarray:
     lo = int(lo) % 180
     hi = int(hi) % 180
     if lo <= hi:
@@ -21,7 +21,7 @@ def _h_in_range(h: np.ndarray, lo: int, hi: int) -> np.ndarray:
     return (h >= lo) | (h <= hi)
 
 
-def _longest_true_run(b: np.ndarray) -> Optional[Tuple[int, int]]:
+def _find_longest_true_span(b: np.ndarray) -> Optional[Tuple[int, int]]:
     arr = np.asarray(b, dtype=bool)
     if arr.size == 0:
         return None
@@ -58,8 +58,8 @@ def _rect_from_inclusive(
 
 
 def _clamp_span_inclusive(lo: Any, hi: Any, vmin: int, vmax: int) -> Tuple[int, int]:
-    lo_i = _clamp_int(lo, vmin, vmax)
-    hi_i = _clamp_int(hi, vmin, vmax)
+    lo_i = _round_and_clamp_int(lo, vmin, vmax)
+    hi_i = _round_and_clamp_int(hi, vmin, vmax)
     if hi_i <= lo_i:
         hi_i = min(vmax, lo_i + 1)
     return lo_i, hi_i
@@ -68,14 +68,14 @@ def _clamp_span_inclusive(lo: Any, hi: Any, vmin: int, vmax: int) -> Tuple[int, 
 def _clamp_span_exclusive(
     lo: Any, hi: Any, vmin: int, vmax_excl: int
 ) -> Tuple[int, int]:
-    lo_i = _clamp_int(lo, vmin, max(vmin, vmax_excl - 1))
-    hi_i = _clamp_int(hi, vmin, vmax_excl)
+    lo_i = _round_and_clamp_int(lo, vmin, max(vmin, vmax_excl - 1))
+    hi_i = _round_and_clamp_int(hi, vmin, vmax_excl)
     if hi_i <= lo_i:
         hi_i = min(vmax_excl, lo_i + 1)
     return lo_i, hi_i
 
 
-def _row_mean(mask_u8: np.ndarray, n_rows: int) -> np.ndarray:
+def _row_foreground_ratio(mask_u8: np.ndarray, n_rows: int) -> np.ndarray:
     if mask_u8.size == 0:
         return np.zeros(n_rows, dtype=np.float32)
     return (mask_u8.mean(axis=1) / 255.0).astype(np.float32)
@@ -91,35 +91,48 @@ def _parse_xy_point(value: Any, field_name: str) -> Tuple[int, int]:
     return int(value["x"]), int(value["y"])
 
 
-def _clamp_u8(v: Any) -> int:
-    return int(max(0, min(255, int(v))))
+def _normalize_odd_window_size(value: int, field_name: str) -> int:
+    window_size = int(value)
+    if window_size < 0:
+        raise ValueError(f"{field_name} must be >= 0")
+    if (window_size % 2) == 0:
+        window_size += 1
+    return window_size
+
+
+def _as_bgr_triplet(value: Any, default: Tuple[int, int, int]) -> Tuple[int, int, int]:
+    if isinstance(value, (list, tuple)) and len(value) == 3:
+        b, g, r = value
+        return (int(b), int(g), int(r))
+    return default
 
 
 @dataclass
-class _SlotD:
+class _SlotInspectionState:
     row: int
     col: int
-    roi: Tuple[int, int, int, int]  # x,y,w,h
-    x_center: float  # full-image x (float)
-    y_junction: int  # full-image y
-    hsv: np.ndarray  # ROI HSV image
+    roi_rect: Tuple[int, int, int, int]  # x,y,w,h
+    x_stem_center: float  # full-image x (float)
+    y_stem_bottom_anchor: int  # full-image y
+    roi_hsv: np.ndarray  # ROI HSV image
+    y_junction_line: Optional[int] = None
 
 
 @dataclass
 class _FailTracker:
-    detector: Any
-    first_fail: Optional[Tuple[str, int, int]] = None
-    first_fail_key: Optional[Tuple[int, int, int]] = None
+    fail_stage_priority: dict[str, int]
+    first_fail_entry: Optional[Tuple[str, int, int]] = None
+    first_fail_sort_key: Optional[Tuple[int, int, int]] = None
 
     def consider(self, code: str, row: int, col: int) -> None:
-        key = (
+        sort_key = (
             int(row),
             int(col),
-            int(self.detector._FAIL_STAGE.get(code, 99)),
+            int(self.fail_stage_priority.get(code, 99)),
         )
-        if self.first_fail_key is None or key < self.first_fail_key:
-            self.first_fail_key = key
-            self.first_fail = (str(code), int(row), int(col))
+        if self.first_fail_sort_key is None or sort_key < self.first_fail_sort_key:
+            self.first_fail_sort_key = sort_key
+            self.first_fail_entry = (str(code), int(row), int(col))
 
 
 @dataclass
@@ -140,6 +153,10 @@ class _OverlayRecorder:
     def center(self, cx: int, cy: int, color: Tuple[int, int, int]) -> None:
         if self.enabled:
             self.ops.append(("center", (int(cx), int(cy), color)))
+
+    def cross(self, cx: int, cy: int, color: Tuple[int, int, int]) -> None:
+        if self.enabled:
+            self.ops.append(("cross", (int(cx), int(cy), color)))
 
     def junction_line(
         self, x: int, w: int, y: int, color: Tuple[int, int, int]
@@ -170,6 +187,9 @@ class _OverlayRecorder:
             elif kind == "center":
                 cx, cy, color = args
                 self.detector._draw_center(img, cx, cy, color)
+            elif kind == "cross":
+                cx, cy, color = args
+                self.detector._draw_cross(img, cx, cy, color)
             elif kind == "junction_line":
                 x, w, y, color = args
                 self.detector._draw_junction_line(img, x, w, y, color)
@@ -179,64 +199,25 @@ class _OverlayRecorder:
 
 
 @dataclass
-class _RodStageCfg:
-    min_mask_area: float
-
-
-@dataclass
-class _JunctionStageCfg:
-    bottom_anchor_percentile: float
-    y_window_up_px: int
-    y_window_down_px: int
-    strip_center_offset_x_px: int
-    strip_width_px: int
-
-
-@dataclass
-class _SplitStageCfg:
-    smooth_half_window_rows: int
-    min_rows_above: int
-    min_rows_below: int
-    kernel_size: int
-
-
-@dataclass
-class _HeightStageCfg:
-    max_upward_deviation_px: int
-
-
-@dataclass
-class _BandStageCfg:
-    y_from_junction_top_px: int
-    y_from_junction_bottom_px: int
-    x_half_width_px: int
-    hue_low: int
-    hue_high: int
-    saturation_smooth_half_window_cols: int
-    saturation_threshold: int
-    width_min_px: int
-    width_max_px: int
-    kernel_size: int
-
-
-@dataclass
-class _OffsetStageCfg:
-    reference_edge_shift_px: float
-    tolerance_px: float
-
-
-@dataclass
-class _GridCfg:
+class _SlotLayoutCfg:
     rows: int
-    cols_per_row: List[int]
-    anchor_left: List[Tuple[int, int]]
-    anchor_right: List[Tuple[int, int]]
-    roi_w: int
-    roi_h: int
+    slots_per_row: List[int]
+    left_anchors: List[Tuple[int, int]]
+    right_anchors: List[Tuple[int, int]]
+    roi_width_px: int
+    roi_height_px: int
 
 
 @dataclass
-class _WhiteRowCfg:
+class _StemStageCfg:
+    hsv_lower: np.ndarray
+    hsv_upper: np.ndarray
+    min_area_px: int
+    bottom_exclude_percentile: float
+
+
+@dataclass
+class _JunctionLineWhiteRowCfg:
     s_max: int
     v_min: int
     lower: np.ndarray
@@ -244,31 +225,48 @@ class _WhiteRowCfg:
 
 
 @dataclass
-class _WhiteCfg:
-    by_row: List[_WhiteRowCfg]
+class _JunctionLineStageCfg:
+    y_from_anchor_up_px: int
+    y_from_anchor_down_px: int
+    outer_radius_px: int
+    inner_exclude_radius_px: int
+    white_row_cfgs: List[_JunctionLineWhiteRowCfg]
+    split_smooth_window_rows: int
+    split_min_rows_above: int
+    split_min_rows_below: int
+    height_check_max_deviation_px: int
 
 
 @dataclass
-class _OverlayStyleCfg:
+class _ColorBandStageCfg:
+    y_below_junction_line_from_px: int
+    y_below_junction_line_to_px: int
+    x_radius_from_stem_center_px: int
+    hue_low: int
+    hue_high: int
+    saturation_threshold: int
+    saturation_smooth_window_cols: int
+    width_check_min_px: int
+    width_check_max_px: int
+    alignment_reference_x_shift_px: float
+    alignment_tolerance_px: float
+
+
+@dataclass
+class _ResultOverlayCfg:
     ok_bgr: Tuple[int, int, int]
     ng_bgr: Tuple[int, int, int]
-    line_width: int
+    stroke_width_px: int
 
 
 @dataclass
 class _DebugOverlayCfg:
-    show_mask: bool
-    show_strips: bool
-    show_band: bool
-    bgr: Tuple[int, int, int]
-    mask_bgr: Tuple[int, int, int]
-
-
-def _as_bgr_triplet(value: Any, default: Tuple[int, int, int]) -> Tuple[int, int, int]:
-    if isinstance(value, (list, tuple)) and len(value) == 3:
-        b, g, r = value
-        return (int(b), int(g), int(r))
-    return default
+    slot_layout: bool
+    stem_mask: bool
+    junction_line: bool
+    color_band: bool
+    guide_bgr: Tuple[int, int, int]
+    mask_overlay_bgr: Tuple[int, int, int]
 
 
 @register_detector("weigao_tray")
@@ -280,12 +278,12 @@ class WeigaoTrayDetector:
     - Cumulative drawing: green marks keep even if later stages fail.
     """
 
-    _FAIL_STAGE = {
-        "ROD_NOT_FOUND": 0,
-        "JUNCTION_NOT_FOUND": 1,
-        "HEIGHT_NG": 2,
-        "BAND_NOT_FOUND": 3,
-        "OFFSET_NG": 4,
+    _FAIL_STAGE_PRIORITY = {
+        "STEM_NOT_FOUND_NG": 0,
+        "JUNCTION_LINE_NOT_FOUND_NG": 1,
+        "JUNCTION_LINE_HEIGHT_NG": 2,
+        "COLOR_BAND_NOT_FOUND_NG": 3,
+        "COLOR_BAND_ALIGNMENT_NG": 4,
     }
 
     def __init__(
@@ -301,196 +299,223 @@ class WeigaoTrayDetector:
 
         self._load_params()
 
+    # Config parsing and validation
     def _load_params(self) -> None:
         p = self.params
-        self.grid_cfg = self._parse_grid_cfg(p)
-        self.yellow_lower, self.yellow_upper = self._parse_yellow_hsv(p)
-        self.rod_cfg = self._parse_rod_cfg(p)
+        self.slot_layout_cfg = self._parse_slot_layout_cfg(p)
+        self.stem_cfg = self._parse_stem_cfg(p)
 
-        j = p.get("junction") or {}
-        self.junction_cfg = self._parse_junction_cfg(j)
-        self.white_cfg = self._parse_white_cfg(j)
-        self.split_cfg = self._parse_split_cfg(j)
-        self.height_cfg = self._parse_height_cfg(j)
+        junction_line_params = p.get("junction_line") or {}
+        self.junction_line_cfg = self._parse_junction_line_cfg(junction_line_params)
 
-        self.band_cfg = self._parse_band_cfg(p)
-        self.offset_cfg = self._parse_offset_cfg(p)
-        self.overlay_cfg = self._parse_overlay_cfg(p)
-        self.dbg_cfg = self._parse_dbg_cfg(p)
+        self.color_band_cfg = self._parse_color_band_cfg(p)
+        self.result_overlay_cfg = self._parse_result_overlay_cfg(p)
+        self.debug_overlay_cfg = self._parse_debug_overlay_cfg(p)
 
         self._validate()
 
-    @staticmethod
-    def _kernel_size_from_half_window(half_window: int) -> int:
-        return int(2 * half_window + 1) if int(half_window) > 0 else 0
-
-    def _parse_grid_cfg(self, p: dict) -> _GridCfg:
-        grid = p.get("grid") or {}
-        roi = grid.get("roi") or {}
-        anchor_left_raw = list(grid.get("anchor_left") or [])
-        anchor_right_raw = list(grid.get("anchor_right") or [])
-        cols_per_row = list(grid.get("cols_per_row") or [17, 17, 17])
-        rows = len(cols_per_row)
-        return _GridCfg(
+    def _parse_slot_layout_cfg(self, p: dict) -> _SlotLayoutCfg:
+        slot_layout = p.get("slot_layout") or {}
+        slot_roi = slot_layout.get("slot_roi") or {}
+        left_anchors_raw = list(slot_layout.get("left_anchors") or [])
+        right_anchors_raw = list(slot_layout.get("right_anchors") or [])
+        slots_per_row = list(slot_layout.get("slots_per_row") or [17, 17, 17])
+        rows = len(slots_per_row)
+        return _SlotLayoutCfg(
             rows=rows,
-            cols_per_row=cols_per_row,
-            anchor_left=[
-                _parse_xy_point(v, "grid.anchor_left") for v in anchor_left_raw
+            slots_per_row=slots_per_row,
+            left_anchors=[
+                _parse_xy_point(v, "slot_layout.left_anchors") for v in left_anchors_raw
             ],
-            anchor_right=[
-                _parse_xy_point(v, "grid.anchor_right") for v in anchor_right_raw
+            right_anchors=[
+                _parse_xy_point(v, "slot_layout.right_anchors")
+                for v in right_anchors_raw
             ],
-            roi_w=int(roi.get("width", 100)),
-            roi_h=int(roi.get("height", 200)),
+            roi_width_px=int(slot_roi.get("width_px", 100)),
+            roi_height_px=int(slot_roi.get("height_px", 200)),
         )
 
-    def _parse_yellow_hsv(self, p: dict) -> Tuple[np.ndarray, np.ndarray]:
-        yh = p.get("yellow_hsv") or {}
-        lower = np.array(yh.get("lower") or [10, 160, 40], dtype=np.uint8)
-        upper = np.array(yh.get("upper") or [30, 255, 255], dtype=np.uint8)
-        return lower, upper
-
-    def _parse_rod_cfg(self, p: dict) -> _RodStageCfg:
-        rod = p.get("rod") or {}
-        return _RodStageCfg(
-            min_mask_area=float(rod.get("min_mask_area", 3500)),
+    def _parse_stem_cfg(self, p: dict) -> _StemStageCfg:
+        stem = p.get("stem") or {}
+        stem_hsv = stem.get("hsv") or {}
+        return _StemStageCfg(
+            hsv_lower=np.array(stem_hsv.get("lower") or [10, 140, 30], dtype=np.uint8),
+            hsv_upper=np.array(stem_hsv.get("upper") or [50, 255, 255], dtype=np.uint8),
+            min_area_px=int(stem.get("min_area_px", 50)),
+            bottom_exclude_percentile=float(
+                stem.get("bottom_exclude_percentile", 90.0)
+            ),
         )
 
-    def _parse_junction_cfg(self, j: dict) -> _JunctionStageCfg:
-        search_region = j.get("search_region") or {}
-        y_window = search_region.get("y_window") or {}
-        strips = search_region.get("strips") or {}
-        return _JunctionStageCfg(
-            bottom_anchor_percentile=float(j.get("bottom_anchor_percentile", 98.0)),
-            y_window_up_px=int(y_window.get("up_px", 60)),
-            y_window_down_px=int(y_window.get("down_px", 30)),
-            strip_center_offset_x_px=int(strips.get("center_offset_x_px", 24)),
-            strip_width_px=int(strips.get("width_px", 24)),
+    def _parse_junction_line_cfg(self, junction_line: dict) -> _JunctionLineStageCfg:
+        search_band = junction_line.get("search_band") or {}
+        y_from_anchor_px = search_band.get("y_from_anchor_px") or {}
+        x_radius_from_stem_center_px = (
+            search_band.get("x_radius_from_stem_center_px") or {}
         )
+        split = junction_line.get("split") or {}
+        min_split_rows = split.get("min_split_rows") or {}
+        smooth_window_rows = _normalize_odd_window_size(
+            int(split.get("smooth_window_rows", 9)),
+            "junction_line.split.smooth_window_rows",
+        )
+        junction_line_height_check = junction_line.get("height_check") or {}
 
-    def _parse_white_cfg(self, j: dict) -> _WhiteCfg:
-        white = j.get("white")
-        if white is None:
-            white_rows_raw: List[Any] = [{} for _ in range(self.grid_cfg.rows)]
-        elif isinstance(white, list):
-            white_rows_raw = list(white)
+        white_by_row = junction_line.get("white_by_row")
+        if white_by_row is None:
+            white_rows_raw: List[Any] = [{} for _ in range(self.slot_layout_cfg.rows)]
+        elif isinstance(white_by_row, list):
+            white_rows_raw = list(white_by_row)
         else:
-            raise ValueError("junction.white must be a list of row configs")
+            raise ValueError("junction_line.white_by_row must be a list of row configs")
 
-        white_rows: List[_WhiteRowCfg] = []
+        white_rows: List[_JunctionLineWhiteRowCfg] = []
         for i, item in enumerate(white_rows_raw):
             if item is None:
                 item = {}
             if not isinstance(item, dict):
-                raise ValueError(f"junction.white[{i}] must be an object")
-            s_max = int(item.get("S_max", 50))
-            v_min = int(item.get("V_min", 50))
+                raise ValueError(f"junction_line.white_by_row[{i}] must be an object")
+            s_max = int(item.get("s_max", 50))
+            v_min = int(item.get("v_min", 50))
             white_rows.append(
-                _WhiteRowCfg(
+                _JunctionLineWhiteRowCfg(
                     s_max=s_max,
                     v_min=v_min,
-                    lower=np.array([0, 0, _clamp_u8(v_min)], dtype=np.uint8),
-                    upper=np.array([179, _clamp_u8(s_max), 255], dtype=np.uint8),
+                    lower=np.array(
+                        [0, 0, int(max(0, min(255, int(v_min))))], dtype=np.uint8
+                    ),
+                    upper=np.array(
+                        [179, int(max(0, min(255, int(s_max)))), 255], dtype=np.uint8
+                    ),
                 )
             )
-        return _WhiteCfg(by_row=white_rows)
-
-    def _parse_split_cfg(self, j: dict) -> _SplitStageCfg:
-        split = j.get("split") or {}
-        split_min_rows = split.get("min_rows") or {}
-        smooth_half_window_rows = int(split.get("smooth_half_window_rows", 3))
-        return _SplitStageCfg(
-            smooth_half_window_rows=smooth_half_window_rows,
-            min_rows_above=int(split_min_rows.get("above", 2)),
-            min_rows_below=int(split_min_rows.get("below", 2)),
-            kernel_size=self._kernel_size_from_half_window(smooth_half_window_rows),
+        return _JunctionLineStageCfg(
+            y_from_anchor_up_px=int(y_from_anchor_px.get("up", 20)),
+            y_from_anchor_down_px=int(y_from_anchor_px.get("down", 40)),
+            outer_radius_px=int(x_radius_from_stem_center_px.get("outer", 34)),
+            inner_exclude_radius_px=int(
+                x_radius_from_stem_center_px.get("inner_exclude", 12)
+            ),
+            white_row_cfgs=white_rows,
+            split_smooth_window_rows=int(smooth_window_rows),
+            split_min_rows_above=int(min_split_rows.get("above", 5)),
+            split_min_rows_below=int(min_split_rows.get("below", 5)),
+            height_check_max_deviation_px=int(
+                junction_line_height_check.get("max_deviation_px", 15)
+            ),
         )
 
-    def _parse_height_cfg(self, j: dict) -> _HeightStageCfg:
-        junction_height = j.get("height") or {}
-        return _HeightStageCfg(
-            max_upward_deviation_px=int(
-                junction_height.get("max_upward_deviation_px", 12)
-            )
+    def _parse_color_band_cfg(self, p: dict) -> _ColorBandStageCfg:
+        color_band = p.get("color_band") or {}
+        search_window = color_band.get("search_window") or {}
+        y_below_junction_line_px = search_window.get("y_below_junction_line_px") or {}
+        color_response = color_band.get("color_response") or {}
+        hue_range = color_response.get("hue_range") or {}
+        saturation = color_response.get("saturation") or {}
+        width_check_px = color_band.get("width_check_px") or {}
+        alignment_check = color_band.get("alignment_check") or {}
+
+        saturation_smooth_window_cols = _normalize_odd_window_size(
+            int(saturation.get("smooth_window_cols", 5)),
+            "color_band.color_response.saturation.smooth_window_cols",
+        )
+        return _ColorBandStageCfg(
+            y_below_junction_line_from_px=int(y_below_junction_line_px.get("from", 10)),
+            y_below_junction_line_to_px=int(y_below_junction_line_px.get("to", 30)),
+            x_radius_from_stem_center_px=int(
+                search_window.get("x_radius_from_stem_center_px", 25)
+            ),
+            hue_low=int(hue_range.get("low", 0)),
+            hue_high=int(hue_range.get("high", 179)),
+            saturation_threshold=int(saturation.get("threshold", 30)),
+            saturation_smooth_window_cols=int(saturation_smooth_window_cols),
+            width_check_min_px=int(width_check_px.get("min", 10)),
+            width_check_max_px=int(width_check_px.get("max", 0)),
+            alignment_reference_x_shift_px=float(
+                alignment_check.get("reference_x_shift_px", 8)
+            ),
+            alignment_tolerance_px=float(alignment_check.get("tolerance_px", 5)),
         )
 
-    def _parse_band_cfg(self, p: dict) -> _BandStageCfg:
-        band = p.get("band") or {}
-        band_search_region = band.get("search_region") or {}
-        band_y_from_junction = band_search_region.get("y_from_junction_px") or {}
-        band_x_window = band_search_region.get("x_window") or {}
-        band_color = band.get("color") or {}
-        band_hue_range = band_color.get("hue_range") or {}
-        band_saturation = band_color.get("saturation") or {}
-        band_width_px = band.get("width_px") or {}
-
-        smooth_half_window_cols = int(band_saturation.get("smooth_half_window_cols", 2))
-        return _BandStageCfg(
-            y_from_junction_top_px=int(band_y_from_junction.get("top", 3)),
-            y_from_junction_bottom_px=int(band_y_from_junction.get("bottom", 30)),
-            x_half_width_px=int(band_x_window.get("half_width_px", 30)),
-            hue_low=int(band_hue_range.get("low", 0)),
-            hue_high=int(band_hue_range.get("high", 179)),
-            saturation_smooth_half_window_cols=smooth_half_window_cols,
-            saturation_threshold=int(band_saturation.get("threshold", 30)),
-            width_min_px=int(band_width_px.get("min", 10)),
-            width_max_px=int(band_width_px.get("max", 0)),
-            kernel_size=self._kernel_size_from_half_window(smooth_half_window_cols),
+    def _parse_result_overlay_cfg(self, p: dict) -> _ResultOverlayCfg:
+        result_overlay = p.get("result_overlay") or {}
+        return _ResultOverlayCfg(
+            ok_bgr=_as_bgr_triplet(result_overlay.get("ok_bgr"), (0, 200, 0)),
+            ng_bgr=_as_bgr_triplet(result_overlay.get("ng_bgr"), (0, 0, 220)),
+            stroke_width_px=max(1, int(result_overlay.get("stroke_width_px", 4))),
         )
 
-    def _parse_offset_cfg(self, p: dict) -> _OffsetStageCfg:
-        offset = p.get("offset") or {}
-        return _OffsetStageCfg(
-            reference_edge_shift_px=float(offset.get("reference_edge_shift_px", 3)),
-            tolerance_px=float(offset.get("tolerance_px", 11)),
-        )
-
-    def _parse_overlay_cfg(self, p: dict) -> _OverlayStyleCfg:
-        overlay = p.get("overlay") or {}
-        return _OverlayStyleCfg(
-            ok_bgr=_as_bgr_triplet(overlay.get("ok_bgr"), (0, 200, 0)),
-            ng_bgr=_as_bgr_triplet(overlay.get("ng_bgr"), (0, 0, 220)),
-            line_width=max(1, int(overlay.get("line_width", 2))),
-        )
-
-    def _parse_dbg_cfg(self, p: dict) -> _DebugOverlayCfg:
-        dbg = p.get("dbg") or {}
+    def _parse_debug_overlay_cfg(self, p: dict) -> _DebugOverlayCfg:
+        debug_overlay = p.get("debug_overlay") or {}
         return _DebugOverlayCfg(
-            show_mask=bool(dbg.get("show_mask", False)),
-            show_strips=bool(dbg.get("show_strips", False)),
-            show_band=bool(dbg.get("show_band", False)),
-            bgr=(220, 0, 0),  # blue in BGR
-            mask_bgr=(140, 60, 0),  # darker orange in BGR
+            slot_layout=bool(debug_overlay.get("slot_layout", False)),
+            stem_mask=bool(debug_overlay.get("stem_mask", False)),
+            junction_line=bool(debug_overlay.get("junction_line", False)),
+            color_band=bool(debug_overlay.get("color_band", False)),
+            guide_bgr=(220, 0, 0),  # blue in BGR
+            mask_overlay_bgr=(140, 60, 0),  # darker orange in BGR
         )
 
     def _validate(self) -> None:
-        grid_cfg = self.grid_cfg
-        if grid_cfg.rows <= 0:
-            raise ValueError("grid.cols_per_row must not be empty")
-        if len(grid_cfg.cols_per_row) != grid_cfg.rows:
-            raise ValueError("internal grid row count mismatch")
-        if any(int(c) <= 0 for c in grid_cfg.cols_per_row):
-            raise ValueError("grid.cols_per_row values must be > 0")
+        slot_layout_cfg = self.slot_layout_cfg
+        if slot_layout_cfg.rows <= 0:
+            raise ValueError("slot_layout.slots_per_row must not be empty")
+        if len(slot_layout_cfg.slots_per_row) != slot_layout_cfg.rows:
+            raise ValueError("internal slot_layout row count mismatch")
+        if any(int(c) <= 0 for c in slot_layout_cfg.slots_per_row):
+            raise ValueError("slot_layout.slots_per_row values must be > 0")
         if (
-            len(grid_cfg.anchor_left) != grid_cfg.rows
-            or len(grid_cfg.anchor_right) != grid_cfg.rows
+            len(slot_layout_cfg.left_anchors) != slot_layout_cfg.rows
+            or len(slot_layout_cfg.right_anchors) != slot_layout_cfg.rows
         ):
             raise ValueError(
-                "grid.anchor_left/right length must equal len(grid.cols_per_row)"
+                "slot_layout.left_anchors/right_anchors length must equal "
+                "len(slot_layout.slots_per_row)"
             )
-        if grid_cfg.roi_w <= 0 or grid_cfg.roi_h <= 0:
-            raise ValueError("grid.roi.width and grid.roi.height must be > 0")
-        if self.yellow_lower.shape != (3,) or self.yellow_upper.shape != (3,):
-            raise ValueError("yellow_hsv.lower/upper must be 3-element lists")
-        if len(self.white_cfg.by_row) != grid_cfg.rows:
-            raise ValueError("junction.white length must equal len(grid.cols_per_row)")
-        if not (0.0 <= self.junction_cfg.bottom_anchor_percentile <= 100.0):
-            raise ValueError("junction.bottom_anchor_percentile must be in [0,100]")
-        if self.junction_cfg.strip_width_px <= 0:
-            raise ValueError("junction.search_region.strips.width_px must be > 0")
-        if self.band_cfg.width_min_px < 0 or self.band_cfg.width_max_px < 0:
-            raise ValueError("band.width_px.min/max must be >= 0")
+        if slot_layout_cfg.roi_width_px <= 0 or slot_layout_cfg.roi_height_px <= 0:
+            raise ValueError("slot_layout.slot_roi.width_px and height_px must be > 0")
+        if self.stem_cfg.hsv_lower.shape != (3,) or self.stem_cfg.hsv_upper.shape != (
+            3,
+        ):
+            raise ValueError("stem.hsv.lower/upper must be 3-element lists")
+        if not (0.0 <= self.stem_cfg.bottom_exclude_percentile <= 100.0):
+            raise ValueError("stem.bottom_exclude_percentile must be in [0,100]")
+        if len(self.junction_line_cfg.white_row_cfgs) != slot_layout_cfg.rows:
+            raise ValueError(
+                "junction_line.white_by_row length must equal "
+                "len(slot_layout.slots_per_row)"
+            )
+        if self.junction_line_cfg.height_check_max_deviation_px < 0:
+            raise ValueError("junction_line.height_check.max_deviation_px must be >= 0")
+        if self.junction_line_cfg.outer_radius_px <= 0:
+            raise ValueError(
+                "junction_line.search_band.x_radius_from_stem_center_px.outer "
+                "must be > 0"
+            )
+        if self.junction_line_cfg.inner_exclude_radius_px < 0:
+            raise ValueError(
+                "junction_line.search_band.x_radius_from_stem_center_px."
+                "inner_exclude must be >= 0"
+            )
+        if (
+            self.junction_line_cfg.outer_radius_px
+            <= self.junction_line_cfg.inner_exclude_radius_px
+        ):
+            raise ValueError(
+                "junction_line.search_band.x_radius_from_stem_center_px.outer "
+                "must be > inner_exclude"
+            )
+        if (
+            self.color_band_cfg.width_check_min_px < 0
+            or self.color_band_cfg.width_check_max_px < 0
+        ):
+            raise ValueError("color_band.width_check_px.min/max must be >= 0")
+        if self.color_band_cfg.x_radius_from_stem_center_px <= 0:
+            raise ValueError(
+                "color_band.search_window.x_radius_from_stem_center_px must be > 0"
+            )
 
+    # Geometry and mask helpers
     def _keep_largest_component_inplace(self, mask_u8: np.ndarray) -> None:
         num, labels, stats, _ = cv2.connectedComponentsWithStats(
             mask_u8, connectivity=8
@@ -509,28 +534,46 @@ class WeigaoTrayDetector:
         mask_u8.fill(0)
         mask_u8[labels == largest_label] = 255
 
-    def _generate_rois(
+    def _generate_slot_rois(
         self, img_w: int, img_h: int
     ) -> List[Tuple[int, int, int, int, int, int]]:
-        grid_cfg = self.grid_cfg
-        rois: List[Tuple[int, int, int, int, int, int]] = []
-        w = max(1, min(int(grid_cfg.roi_w), int(img_w)))
-        h = max(1, min(int(grid_cfg.roi_h), int(img_h)))
-        for r in range(grid_cfg.rows):
-            cols = int(grid_cfg.cols_per_row[r])
-            xL, yT = grid_cfg.anchor_left[r]
-            xR, _yT2 = grid_cfg.anchor_right[r]
-            xL = _clamp_int(xL, 0, max(0, img_w - w))
-            xR = _clamp_int(xR, 0, max(0, img_w - w))
-            yT = _clamp_int(yT, 0, max(0, img_h - h))
-            if xR < xL:
-                xR = xL
-            dx = 0.0 if cols <= 1 else (xR - xL) / float(cols - 1)
-            for c in range(cols):
-                x = _clamp_int(xL + c * dx, 0, max(0, img_w - w))
-                rois.append((r, c, x, yT, w, h))
-        return rois
+        slot_layout_cfg = self.slot_layout_cfg
+        slot_rois: List[Tuple[int, int, int, int, int, int]] = []
+        roi_w = max(1, min(int(slot_layout_cfg.roi_width_px), int(img_w)))
+        roi_h = max(1, min(int(slot_layout_cfg.roi_height_px), int(img_h)))
+        max_x = max(0, img_w - roi_w)
+        max_y = max(0, img_h - roi_h)
+        for row_idx in range(slot_layout_cfg.rows):
+            cols = int(slot_layout_cfg.slots_per_row[row_idx])
+            x_left, y_top = slot_layout_cfg.left_anchors[row_idx]
+            x_right, _y_top2 = slot_layout_cfg.right_anchors[row_idx]
+            x_left = _round_and_clamp_int(x_left, 0, max_x)
+            x_right = _round_and_clamp_int(x_right, 0, max_x)
+            y_top = _round_and_clamp_int(y_top, 0, max_y)
+            if x_right < x_left:
+                x_right = x_left
+            x_step = 0.0 if cols <= 1 else (x_right - x_left) / float(cols - 1)
+            for col_idx in range(cols):
+                x = _round_and_clamp_int(x_left + col_idx * x_step, 0, max_x)
+                slot_rois.append((row_idx, col_idx, x, y_top, roi_w, roi_h))
+        return slot_rois
 
+    def _junction_line_search_strip_spans(
+        self, cx_in_roi: float, roi_w: int
+    ) -> Tuple[int, int, int, int]:
+        junction_line_cfg = self.junction_line_cfg
+        cx_i = _round_and_clamp_int(cx_in_roi, 0, roi_w - 1)
+        outer_radius = int(junction_line_cfg.outer_radius_px)
+        inner_exclude_radius = int(junction_line_cfg.inner_exclude_radius_px)
+        lx0, lx1 = _clamp_span_exclusive(
+            cx_i - outer_radius, cx_i - inner_exclude_radius, 0, roi_w
+        )
+        rx0, rx1 = _clamp_span_exclusive(
+            cx_i + inner_exclude_radius, cx_i + outer_radius, 0, roi_w
+        )
+        return lx0, lx1, rx0, rx1
+
+    # Overlay drawing primitives
     def _draw_rect(
         self,
         img: np.ndarray,
@@ -546,15 +589,39 @@ class WeigaoTrayDetector:
             color,
             thickness=max(
                 1,
-                int(self.overlay_cfg.line_width if thickness is None else thickness),
+                int(
+                    self.result_overlay_cfg.stroke_width_px
+                    if thickness is None
+                    else thickness
+                ),
             ),
         )
 
     def _draw_center(
         self, img: np.ndarray, cx: int, cy: int, color: Tuple[int, int, int]
     ) -> None:
-        r = max(1, int(self.overlay_cfg.line_width))
+        r = max(1, int(self.result_overlay_cfg.stroke_width_px))
         cv2.circle(img, (int(cx), int(cy)), r, color, thickness=-1)
+
+    def _draw_cross(
+        self, img: np.ndarray, cx: int, cy: int, color: Tuple[int, int, int]
+    ) -> None:
+        arm = max(2, int(self.result_overlay_cfg.stroke_width_px) * 2)
+        t = max(1, int(self.result_overlay_cfg.stroke_width_px))
+        cv2.line(
+            img,
+            (int(cx - arm), int(cy - arm)),
+            (int(cx + arm), int(cy + arm)),
+            color,
+            thickness=t,
+        )
+        cv2.line(
+            img,
+            (int(cx - arm), int(cy + arm)),
+            (int(cx + arm), int(cy - arm)),
+            color,
+            thickness=t,
+        )
 
     def _draw_junction_line(
         self, img: np.ndarray, x: int, w: int, y: int, color: Tuple[int, int, int]
@@ -564,7 +631,7 @@ class WeigaoTrayDetector:
             (int(x), int(y)),
             (int(x + w), int(y)),
             color,
-            thickness=self.overlay_cfg.line_width,
+            thickness=self.result_overlay_cfg.stroke_width_px,
         )
 
     def _draw_mask_overlay(
@@ -590,292 +657,375 @@ class WeigaoTrayDetector:
         blended = cv2.addWeighted(roi, 1.0 - float(alpha), color_img, float(alpha), 0.0)
         roi[m] = blended[m]
 
-    def _junction_strip_spans(
-        self, cx_in_roi: float, roi_w: int
-    ) -> Tuple[int, int, int, int]:
-        junction_cfg = self.junction_cfg
-        cx_i = _clamp_int(cx_in_roi, 0, roi_w - 1)
-        d = int(junction_cfg.strip_center_offset_x_px)
-        ws = max(1, int(round(junction_cfg.strip_width_px / 2.0)))
-        lx0, lx1 = _clamp_span_exclusive(cx_i - d - ws, cx_i - d + ws, 0, roi_w)
-        rx0, rx1 = _clamp_span_exclusive(cx_i + d - ws, cx_i + d + ws, 0, roi_w)
-        return lx0, lx1, rx0, rx1
-
-    def _collect_slots_until_junction(
+    # Detection stages
+    def _locate_stem_stage(
         self,
         img: np.ndarray,
-        rois: List[Tuple[int, int, int, int, int, int]],
+        slot_rois: List[Tuple[int, int, int, int, int, int]],
         overlay: _OverlayRecorder,
         fail_tracker: _FailTracker,
-    ) -> Tuple[List[_SlotD], List[List[int]]]:
-        rod_cfg = self.rod_cfg
-        junction_cfg = self.junction_cfg
-        split_cfg = self.split_cfg
-        white_cfg = self.white_cfg
-        dbg_cfg = self.dbg_cfg
-        overlay_cfg = self.overlay_cfg
-        slots_d_ok: List[_SlotD] = []
-        junction_by_row: List[List[int]] = [[] for _ in range(self.grid_cfg.rows)]
+    ) -> List[_SlotInspectionState]:
+        stem_cfg = self.stem_cfg
+        debug_overlay_cfg = self.debug_overlay_cfg
+        overlay_cfg = self.result_overlay_cfg
+        stem_min_area_px = int(stem_cfg.min_area_px)
+        bottom_exclude_percentile = (
+            max(0.0, min(100.0, float(stem_cfg.bottom_exclude_percentile))) / 100.0
+        )
+        slots_stem_ok: List[_SlotInspectionState] = []
 
-        for r, c, x, y, w, h in rois:
-            white_row_cfg = white_cfg.by_row[r]
+        for r, c, x, y, w, h in slot_rois:
             roi_bgr = img[y : y + h, x : x + w]
             roi_hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
-            core = cv2.inRange(roi_hsv, self.yellow_lower, self.yellow_upper)
-            self._keep_largest_component_inplace(core)
+            stem_mask_raw = cv2.inRange(roi_hsv, stem_cfg.hsv_lower, stem_cfg.hsv_upper)
+            self._keep_largest_component_inplace(stem_mask_raw)
 
-            if dbg_cfg.show_mask:
-                overlay.mask_overlay(x, y, core, dbg_cfg.mask_bgr, alpha=0.55)
+            if debug_overlay_cfg.stem_mask:
+                overlay.mask_overlay(
+                    x,
+                    y,
+                    stem_mask_raw,
+                    debug_overlay_cfg.mask_overlay_bgr,
+                    alpha=0.55,
+                )
 
-            M = cv2.moments(core, binaryImage=True)
-            m00 = float(M.get("m00", 0.0))
-            if m00 < float(rod_cfg.min_mask_area):
+            stem_mask_raw_area = int(cv2.countNonZero(stem_mask_raw))
+            if stem_mask_raw_area < stem_min_area_px:
                 overlay.rect((x, y, w, h), overlay_cfg.ng_bgr)
-                fail_tracker.consider("ROD_NOT_FOUND", r, c)
+                fail_tracker.consider("STEM_NOT_FOUND_NG", r, c)
                 continue
 
-            cx = float(M["m10"] / m00)
-            cy = float(M["m01"] / m00)
-            Cx = int(round(x + cx))
-            Cy = int(round(y + cy))
-            overlay.center(Cx, Cy, overlay_cfg.ok_bgr)
-
-            row_cnt = (core > 0).sum(axis=1).astype(np.int32)
-            total = int(row_cnt.sum())
-
-            cum = np.cumsum(row_cnt, dtype=np.int64)
-            pct = (
-                max(0.0, min(100.0, float(junction_cfg.bottom_anchor_percentile)))
-                / 100.0
+            raw_mask_row_counts = (stem_mask_raw > 0).sum(axis=1).astype(np.int32)
+            raw_mask_foreground_total = int(raw_mask_row_counts.sum())
+            raw_mask_row_cumsum = np.cumsum(raw_mask_row_counts, dtype=np.int64)
+            bottom_exclude_rank = (
+                int(
+                    math.floor(
+                        bottom_exclude_percentile * (raw_mask_foreground_total - 1)
+                    )
+                )
+                if raw_mask_foreground_total > 1
+                else 0
             )
-            rank = int(math.floor(pct * (total - 1))) if total > 1 else 0
-            y_rod_bottom = int(np.searchsorted(cum, rank + 1, side="left"))
-
-            y0, y1 = _clamp_span_inclusive(
-                y_rod_bottom - junction_cfg.y_window_up_px,
-                y_rod_bottom + junction_cfg.y_window_down_px,
-                0,
-                h - 1,
+            y_stem_exclude_cut = int(
+                np.searchsorted(
+                    raw_mask_row_cumsum, bottom_exclude_rank + 1, side="left"
+                )
             )
 
-            lx0, lx1, rx0, rx1 = self._junction_strip_spans(cx, w)
+            stem_mask_trimmed = stem_mask_raw.copy()
+            if y_stem_exclude_cut + 1 < h:
+                stem_mask_trimmed[y_stem_exclude_cut + 1 :, :] = 0
 
-            if dbg_cfg.show_strips:
-                overlay.rect(
-                    _rect_from_inclusive(x + lx0, y + y0, x + lx1 - 1, y + y1),
-                    dbg_cfg.bgr,
-                    thickness=1,
+            trimmed_moments = cv2.moments(stem_mask_trimmed, binaryImage=True)
+            stem_mask_trimmed_area = float(trimmed_moments.get("m00", 0.0))
+            if stem_mask_trimmed_area <= 0.0:
+                overlay.rect((x, y, w, h), overlay_cfg.ng_bgr)
+                fail_tracker.consider("STEM_NOT_FOUND_NG", r, c)
+                continue
+
+            stem_cx_roi = float(trimmed_moments["m10"] / stem_mask_trimmed_area)
+            stem_cy_roi = float(trimmed_moments["m01"] / stem_mask_trimmed_area)
+            stem_cx_img = int(round(x + stem_cx_roi))
+            stem_cy_img = int(round(y + stem_cy_roi))
+            overlay.center(stem_cx_img, stem_cy_img, overlay_cfg.ok_bgr)
+
+            trimmed_mask_row_counts = (
+                (stem_mask_trimmed > 0).sum(axis=1).astype(np.int32)
+            )
+            trimmed_nonzero_rows = np.flatnonzero(trimmed_mask_row_counts > 0)
+            if trimmed_nonzero_rows.size <= 0:
+                overlay.rect((x, y, w, h), overlay_cfg.ng_bgr)
+                fail_tracker.consider("STEM_NOT_FOUND_NG", r, c)
+                continue
+            y_stem_bottom_anchor = int(trimmed_nonzero_rows[-1])
+
+            slots_stem_ok.append(
+                _SlotInspectionState(
+                    row=r,
+                    col=c,
+                    roi_rect=(x, y, w, h),
+                    x_stem_center=float(x + stem_cx_roi),
+                    y_stem_bottom_anchor=int(y + y_stem_bottom_anchor),
+                    roi_hsv=roi_hsv,
                 )
-                overlay.rect(
-                    _rect_from_inclusive(x + rx0, y + y0, x + rx1 - 1, y + y1),
-                    dbg_cfg.bgr,
-                    thickness=1,
-                )
+            )
+        return slots_stem_ok
 
-            win_hsv = roi_hsv[y0 : y1 + 1, :]
-            win = cv2.inRange(win_hsv, white_row_cfg.lower, white_row_cfg.upper)
-            n_rows = int(y1 - y0 + 1)
-            l_mean = _row_mean(win[:, lx0:lx1], n_rows)
-            r_mean = _row_mean(win[:, rx0:rx1], n_rows)
-            score = 0.5 * (l_mean + r_mean)
+    def _process_junction_line_stage(
+        self,
+        slots_stem_ok: List[_SlotInspectionState],
+        overlay: _OverlayRecorder,
+        fail_tracker: _FailTracker,
+    ) -> List[_SlotInspectionState]:
+        junction_line_cfg = self.junction_line_cfg
+        debug_overlay_cfg = self.debug_overlay_cfg
+        overlay_cfg = self.result_overlay_cfg
+        slots_junction_line_located: List[_SlotInspectionState] = []
+        junction_line_y_by_row: List[List[int]] = [
+            [] for _ in range(self.slot_layout_cfg.rows)
+        ]
 
-            if split_cfg.kernel_size > 0 and score.size > 1:
-                score_s = cv2.blur(
-                    score.reshape(-1, 1),
-                    (1, split_cfg.kernel_size),
+        for slot in slots_stem_ok:
+            x, y, w, h = slot.roi_rect
+            junction_line_white_row_cfg = junction_line_cfg.white_row_cfgs[slot.row]
+            search_y0, search_y1 = _clamp_span_inclusive(
+                slot.y_stem_bottom_anchor - junction_line_cfg.y_from_anchor_up_px,
+                slot.y_stem_bottom_anchor + junction_line_cfg.y_from_anchor_down_px,
+                y,
+                y + h - 1,
+            )
+            lx0, lx1, rx0, rx1 = self._junction_line_search_strip_spans(
+                slot.x_stem_center - x, w
+            )
+            search_strip_rects = [
+                _rect_from_inclusive(x + lx0, search_y0, x + lx1 - 1, search_y1),
+                _rect_from_inclusive(x + rx0, search_y0, x + rx1 - 1, search_y1),
+            ]
+
+            if debug_overlay_cfg.junction_line:
+                for rect in search_strip_rects:
+                    overlay.rect(rect, debug_overlay_cfg.guide_bgr, thickness=1)
+
+            search_y0_roi, search_y1_roi = _clamp_span_inclusive(
+                search_y0 - y, search_y1 - y, 0, h - 1
+            )
+            junction_window_hsv = slot.roi_hsv[search_y0_roi : search_y1_roi + 1, :]
+            junction_white_mask = cv2.inRange(
+                junction_window_hsv,
+                junction_line_white_row_cfg.lower,
+                junction_line_white_row_cfg.upper,
+            )
+            # Build a single virtual search region by concatenating the left/right
+            # strips. All later row-wise operations work on this merged region.
+            merged_search_strips_white_mask = np.concatenate(
+                (junction_white_mask[:, lx0:lx1], junction_white_mask[:, rx0:rx1]),
+                axis=1,
+            )
+            white_row_response = _row_foreground_ratio(
+                merged_search_strips_white_mask,
+                int(merged_search_strips_white_mask.shape[0]),
+            )
+
+            if (
+                junction_line_cfg.split_smooth_window_rows > 1
+                and white_row_response.size > 1
+            ):
+                white_row_response_smoothed = cv2.blur(
+                    white_row_response.reshape(-1, 1),
+                    (1, junction_line_cfg.split_smooth_window_rows),
                     borderType=cv2.BORDER_REPLICATE,
                 ).reshape(-1)
             else:
-                score_s = score
+                white_row_response_smoothed = white_row_response
 
-            n = int(score_s.size)
-            k0 = max(1, int(split_cfg.min_rows_above))
-            k1 = n - max(1, int(split_cfg.min_rows_below))
-            strip_rects = [
-                _rect_from_inclusive(x + lx0, y + y0, x + lx1 - 1, y + y1),
-                _rect_from_inclusive(x + rx0, y + y0, x + rx1 - 1, y + y1),
-            ]
-            if n < 2 or k0 > k1:
-                for rect in strip_rects:
+            window_rows = int(white_row_response.size)
+            split_row_min = max(1, int(junction_line_cfg.split_min_rows_above))
+            split_row_max = window_rows - max(
+                1, int(junction_line_cfg.split_min_rows_below)
+            )
+            if window_rows < 2 or split_row_min > split_row_max:
+                for rect in search_strip_rects:
                     overlay.rect(rect, overlay_cfg.ng_bgr)
-                fail_tracker.consider("JUNCTION_NOT_FOUND", r, c)
+                fail_tracker.consider("JUNCTION_LINE_NOT_FOUND_NG", slot.row, slot.col)
                 continue
 
-            ps = np.concatenate(([0.0], np.cumsum(score_s, dtype=np.float32)))
-            ks = np.arange(k0, k1 + 1, dtype=np.int32)
-            sum_above = ps[ks]
-            sum_below = ps[n] - sum_above
-            mu_above = sum_above / ks
-            mu_below = sum_below / (n - ks)
-            contrast = mu_below - mu_above
-            idx = int(np.argmax(contrast))
-            best_k = int(ks[idx])
-
-            y_junction = int(y + y0 + best_k)
-            slots_d_ok.append(
-                _SlotD(
-                    row=r,
-                    col=c,
-                    roi=(x, y, w, h),
-                    x_center=float(x + cx),
-                    y_junction=y_junction,
-                    hsv=roi_hsv,
-                )
+            # Statistical split line: choose the row that maximizes
+            # (mean white response below) - (mean white response above).
+            # This matches the process assumption that the region below the
+            # junction is whiter than the region above it.
+            white_row_response_prefix_sums = np.concatenate(
+                ([0.0], np.cumsum(white_row_response_smoothed, dtype=np.float32))
             )
-            junction_by_row[r].append(y_junction)
+            candidate_split_rows = np.arange(
+                split_row_min, split_row_max + 1, dtype=np.int32
+            )
+            white_sum_above = white_row_response_prefix_sums[candidate_split_rows]
+            white_sum_below = (
+                white_row_response_prefix_sums[window_rows] - white_sum_above
+            )
+            white_mean_above = white_sum_above / candidate_split_rows
+            white_mean_below = white_sum_below / (window_rows - candidate_split_rows)
+            split_contrast = white_mean_below - white_mean_above
+            best_split_idx = int(np.argmax(split_contrast))
+            best_split_row_in_window = int(candidate_split_rows[best_split_idx])
 
-        return slots_d_ok, junction_by_row
+            slot.y_junction_line = int(search_y0 + best_split_row_in_window)
+            slots_junction_line_located.append(slot)
+            junction_line_y_by_row[slot.row].append(int(slot.y_junction_line))
 
-    def _apply_height_stage(
-        self,
-        slots_d_ok: List[_SlotD],
-        junction_by_row: List[List[int]],
-        overlay: _OverlayRecorder,
-        fail_tracker: _FailTracker,
-    ) -> List[_SlotD]:
-        height_cfg = self.height_cfg
-        overlay_cfg = self.overlay_cfg
-        baseline_by_row: List[Optional[float]] = [
-            float(np.median(ys)) if ys else None for ys in junction_by_row
+        junction_line_height_baseline_by_row: List[Optional[float]] = [
+            float(np.median(ys)) if ys else None for ys in junction_line_y_by_row
         ]
 
-        slots_height_ok: List[_SlotD] = []
-        for slot in slots_d_ok:
-            base = baseline_by_row[slot.row]
-            x, y, w, h = slot.roi
-            if base is None:
+        slots_junction_line_ok: List[_SlotInspectionState] = []
+        for slot in slots_junction_line_located:
+            junction_line_height_baseline = junction_line_height_baseline_by_row[
+                slot.row
+            ]
+            x, y, w, h = slot.roi_rect
+            if junction_line_height_baseline is None:
                 overlay.rect((x, y, w, h), overlay_cfg.ng_bgr)
-                fail_tracker.consider("JUNCTION_NOT_FOUND", slot.row, slot.col)
+                fail_tracker.consider("JUNCTION_LINE_NOT_FOUND_NG", slot.row, slot.col)
                 continue
 
-            lx0, lx1, rx0, rx1 = self._junction_strip_spans(slot.x_center - x, w)
+            lx0, lx1, rx0, rx1 = self._junction_line_search_strip_spans(
+                slot.x_stem_center - x, w
+            )
             # Draw only on left/right strips to avoid covering the center feature.
             line_segments = [
                 (x + lx0, max(0, lx1 - lx0 - 1)),
                 (x + rx0, max(0, rx1 - rx0 - 1)),
             ]
 
-            threshold = float(base) - float(height_cfg.max_upward_deviation_px)
-            height_ok = float(slot.y_junction) >= threshold
-            line_color = overlay_cfg.ok_bgr if height_ok else overlay_cfg.ng_bgr
+            y_junction_line = (
+                int(slot.y_junction_line) if slot.y_junction_line is not None else y
+            )
+            junction_line_height_abs_deviation_px = abs(
+                float(y_junction_line) - float(junction_line_height_baseline)
+            )
+            junction_line_height_ok = junction_line_height_abs_deviation_px <= float(
+                junction_line_cfg.height_check_max_deviation_px
+            )
+            line_color = (
+                overlay_cfg.ok_bgr if junction_line_height_ok else overlay_cfg.ng_bgr
+            )
             for seg_x, seg_w in line_segments:
-                overlay.junction_line(seg_x, seg_w, slot.y_junction, line_color)
-            if not height_ok:
-                for seg_x, seg_w in line_segments:
-                    overlay.junction_line(
-                        seg_x, seg_w, slot.y_junction, overlay_cfg.ng_bgr
-                    )
-                fail_tracker.consider("HEIGHT_NG", slot.row, slot.col)
+                overlay.junction_line(seg_x, seg_w, y_junction_line, line_color)
+            if not junction_line_height_ok:
+                fail_tracker.consider("JUNCTION_LINE_HEIGHT_NG", slot.row, slot.col)
                 continue
-            slots_height_ok.append(slot)
+            slots_junction_line_ok.append(slot)
 
-        return slots_height_ok
+        return slots_junction_line_ok
 
-    def _apply_band_offset_stage(
+    def _process_color_band_stage(
         self,
-        slots_height_ok: List[_SlotD],
+        slots_junction_line_ok: List[_SlotInspectionState],
         overlay: _OverlayRecorder,
         fail_tracker: _FailTracker,
     ) -> None:
-        band_cfg = self.band_cfg
-        offset_cfg = self.offset_cfg
-        dbg_cfg = self.dbg_cfg
-        overlay_cfg = self.overlay_cfg
-        for slot in slots_height_ok:
-            x, y, w, h = slot.roi
-            cols = int(self.grid_cfg.cols_per_row[slot.row])
+        color_band_cfg = self.color_band_cfg
+        debug_overlay_cfg = self.debug_overlay_cfg
+        overlay_cfg = self.result_overlay_cfg
+        slots_per_row = self.slot_layout_cfg.slots_per_row
+        for slot in slots_junction_line_ok:
+            if slot.y_junction_line is None:
+                fail_tracker.consider("JUNCTION_LINE_NOT_FOUND_NG", slot.row, slot.col)
+                continue
+            x, y, w, h = slot.roi_rect
             x1_max = x + w - 1
             y1_max = y + h - 1
 
             y0f, y1f = _clamp_span_inclusive(
-                slot.y_junction + band_cfg.y_from_junction_top_px,
-                slot.y_junction + band_cfg.y_from_junction_bottom_px,
+                slot.y_junction_line + color_band_cfg.y_below_junction_line_from_px,
+                slot.y_junction_line + color_band_cfg.y_below_junction_line_to_px,
                 y,
                 y1_max,
             )
-            xc = _clamp_int(slot.x_center, x, x1_max)
+            xc = _round_and_clamp_int(slot.x_stem_center, x, x1_max)
             x0f, x1f = _clamp_span_inclusive(
-                xc - band_cfg.x_half_width_px, xc + band_cfg.x_half_width_px, x, x1_max
+                xc - color_band_cfg.x_radius_from_stem_center_px,
+                xc + color_band_cfg.x_radius_from_stem_center_px,
+                x,
+                x1_max,
             )
-            band_rect = _rect_from_inclusive(x0f, y0f, x1f, y1f)
+            color_band_search_rect = _rect_from_inclusive(x0f, y0f, x1f, y1f)
 
-            if dbg_cfg.show_band:
-                overlay.rect(band_rect, dbg_cfg.bgr, thickness=1)
+            if debug_overlay_cfg.color_band:
+                overlay.rect(
+                    color_band_search_rect,
+                    debug_overlay_cfg.guide_bgr,
+                    thickness=1,
+                )
 
             if y1f <= y0f or x1f <= x0f:
-                overlay.rect(band_rect, overlay_cfg.ng_bgr)
-                fail_tracker.consider("BAND_NOT_FOUND", slot.row, slot.col)
+                overlay.rect(color_band_search_rect, overlay_cfg.ng_bgr)
+                fail_tracker.consider("COLOR_BAND_NOT_FOUND_NG", slot.row, slot.col)
                 continue
 
             lx0, lx1 = _clamp_span_inclusive(x0f - x, x1f - x, 0, w - 1)
             ly0, ly1 = _clamp_span_inclusive(y0f - y, y1f - y, 0, h - 1)
-            roi_hsv = slot.hsv[ly0 : ly1 + 1, lx0 : lx1 + 1]
+            roi_hsv = slot.roi_hsv[ly0 : ly1 + 1, lx0 : lx1 + 1]
             Hc = roi_hsv[:, :, 0]
             Sc = roi_hsv[:, :, 1].astype(np.float32)
-            m = _h_in_range(Hc, band_cfg.hue_low, band_cfg.hue_high)
+            m = _hue_in_range(Hc, color_band_cfg.hue_low, color_band_cfg.hue_high)
             s_masked = np.where(m, Sc, np.nan)
             s_col = np.nanmedian(s_masked, axis=0).astype(np.float32)
             s_col = np.nan_to_num(s_col, nan=0.0)
-            if band_cfg.kernel_size > 0 and s_col.size > 1:
+            if color_band_cfg.saturation_smooth_window_cols > 1 and s_col.size > 1:
                 s_col = cv2.blur(
                     s_col.reshape(1, -1),
-                    (band_cfg.kernel_size, 1),
+                    (color_band_cfg.saturation_smooth_window_cols, 1),
                     borderType=cv2.BORDER_REPLICATE,
                 ).reshape(-1)
 
-            run = _longest_true_run(s_col >= float(band_cfg.saturation_threshold))
+            run = _find_longest_true_span(
+                s_col >= float(color_band_cfg.saturation_threshold)
+            )
             if run is None:
-                overlay.rect(band_rect, overlay_cfg.ng_bgr)
-                fail_tracker.consider("BAND_NOT_FOUND", slot.row, slot.col)
+                overlay.rect(color_band_search_rect, overlay_cfg.ng_bgr)
+                fail_tracker.consider("COLOR_BAND_NOT_FOUND_NG", slot.row, slot.col)
                 continue
 
             L, R = run
             width = int(R - L + 1)
-            if width < int(band_cfg.width_min_px) or (
-                int(band_cfg.width_max_px) > 0 and width > int(band_cfg.width_max_px)
+            if width < int(color_band_cfg.width_check_min_px) or (
+                int(color_band_cfg.width_check_max_px) > 0
+                and width > int(color_band_cfg.width_check_max_px)
             ):
-                overlay.rect(band_rect, overlay_cfg.ng_bgr)
-                fail_tracker.consider("BAND_NOT_FOUND", slot.row, slot.col)
+                overlay.rect(color_band_search_rect, overlay_cfg.ng_bgr)
+                fail_tracker.consider("COLOR_BAND_NOT_FOUND_NG", slot.row, slot.col)
                 continue
 
             xL = int(x0f + L)
             xR = int(x0f + R)
-            x_band = float((xL + xR) / 2.0)
-            y_mid = int(round((y0f + y1f) / 2.0))
+            x_color_band_center = float((xL + xR) / 2.0)
+            y_color_band_center = int(round((y0f + y1f) / 2.0))
+            x_color_band_center_i = int(round(x_color_band_center))
 
-            if dbg_cfg.show_band:
+            if debug_overlay_cfg.color_band:
                 overlay.rect(
-                    _rect_from_inclusive(xL, y0f, xL, y1f), dbg_cfg.bgr, thickness=1
+                    _rect_from_inclusive(xL, y0f, xL, y1f),
+                    debug_overlay_cfg.guide_bgr,
+                    thickness=1,
                 )
                 overlay.rect(
-                    _rect_from_inclusive(xR, y0f, xR, y1f), dbg_cfg.bgr, thickness=1
+                    _rect_from_inclusive(xR, y0f, xR, y1f),
+                    debug_overlay_cfg.guide_bgr,
+                    thickness=1,
                 )
-
-            t = 0.0 if cols <= 1 else float(slot.col) / float(cols - 1)
-            edge_shift_px = float(offset_cfg.reference_edge_shift_px)
-            base_shift = (-edge_shift_px) + (2.0 * edge_shift_px) * t
-            x_ref = float(slot.x_center) + base_shift
-            offset_ok = (
-                (x_ref - float(offset_cfg.tolerance_px))
-                <= x_band
-                <= (x_ref + float(offset_cfg.tolerance_px))
-            )
 
             overlay.center(
-                int(round(x_band)),
-                int(y_mid),
-                overlay_cfg.ok_bgr if offset_ok else overlay_cfg.ng_bgr,
+                x_color_band_center_i,
+                int(y_color_band_center),
+                overlay_cfg.ok_bgr,
             )
-            if not offset_ok:
-                overlay.center(int(round(x_band)), int(y_mid), overlay_cfg.ng_bgr)
-                fail_tracker.consider("OFFSET_NG", slot.row, slot.col)
+            slot_count = int(slots_per_row[slot.row])
+            t = 0.0 if slot_count <= 1 else float(slot.col) / float(slot_count - 1)
+            edge_shift_px = float(color_band_cfg.alignment_reference_x_shift_px)
+            base_shift = (-edge_shift_px) + (2.0 * edge_shift_px) * t
+            x_ref = float(slot.x_stem_center) + base_shift
+            color_band_alignment_ok = (
+                (x_ref - float(color_band_cfg.alignment_tolerance_px))
+                <= x_color_band_center
+                <= (x_ref + float(color_band_cfg.alignment_tolerance_px))
+            )
+            if not color_band_alignment_ok:
+                overlay.cross(
+                    x_color_band_center_i,
+                    int(y_color_band_center),
+                    overlay_cfg.ng_bgr,
+                )
+                fail_tracker.consider("COLOR_BAND_ALIGNMENT_NG", slot.row, slot.col)
 
+    # Result and entry points
     def _finalize_result(
         self, overlay_img: Optional[np.ndarray], fail_tracker: _FailTracker
     ):
-        if fail_tracker.first_fail is None:
+        if fail_tracker.first_fail_entry is None:
             return True, "OK", overlay_img, "OK"
-        code, rr, cc = fail_tracker.first_fail
+        code, rr, cc = fail_tracker.first_fail_entry
         return False, f"NG: {code} r={rr} c={cc}", overlay_img, code
 
     def detect(self, img: np.ndarray):
@@ -893,18 +1043,16 @@ class WeigaoTrayDetector:
             )
 
         img_h, img_w = img.shape[:2]
-        rois = self._generate_rois(img_w, img_h)
+        slot_rois = self._generate_slot_rois(img_w, img_h)
 
         overlay_img = img.copy() if self.generate_overlay else None
         overlay = _OverlayRecorder(detector=self, enabled=overlay_img is not None)
-        fail_tracker = _FailTracker(detector=self)
-        slots_d_ok, junction_by_row = self._collect_slots_until_junction(
-            img, rois, overlay, fail_tracker
+        fail_tracker = _FailTracker(fail_stage_priority=self._FAIL_STAGE_PRIORITY)
+        slots_stem_ok = self._locate_stem_stage(img, slot_rois, overlay, fail_tracker)
+        slots_junction_line_ok = self._process_junction_line_stage(
+            slots_stem_ok, overlay, fail_tracker
         )
-        slots_height_ok = self._apply_height_stage(
-            slots_d_ok, junction_by_row, overlay, fail_tracker
-        )
-        self._apply_band_offset_stage(slots_height_ok, overlay, fail_tracker)
+        self._process_color_band_stage(slots_junction_line_ok, overlay, fail_tracker)
         overlay.render(overlay_img)
         return self._finalize_result(overlay_img, fail_tracker)
 
