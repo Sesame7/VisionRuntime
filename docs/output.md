@@ -11,13 +11,14 @@
 
 ## 2. Interfaces and Responsibilities
 
-- `OutputChannel`: `start()/stop()` manage resources; `publish(rec, overlay)` is a synchronous entry (`overlay` may be `None`). Any IO inside the channel must be made asynchronous by the channel itself (prefer helpers from `core/lifecycle.py` such as `spawn_background_task` or `run_async`). A channel must not call `shutdown_loop`. Channels may optionally expose `raise_if_failed()` for runtime health checks.
+- `OutputChannel`: `start()/stop()` manage resources; `publish(rec, overlay)` is a synchronous entry (`overlay` may be `None`). Any IO inside the channel must be made asynchronous by the channel itself (prefer helpers from `utils/lifecycle.py` such as `spawn_background_task` or `run_async`). A channel must not call `shutdown_loop`. Channels may optionally expose `raise_if_failed()` for runtime health checks.
 - Optional: `publish_heartbeat(ts)` to expose an online heartbeat (e.g., toggle Modbus bit or update HMI indicator).
 - `OutputManager`: holds the channel list and fans out results. In-memory history/stats/latest preview are maintained by `ResultStore` (which `OutputManager` proxies to HMI/Modbus readers). On `publish`, it stores first, then calls channels in order; exceptions must not block later channels. Track fire-and-forget tasks created by channels; on `stop()`, cancel/await them before returning.
 
 ## 3. Channel Semantics (Summary)
 
 - HMI: HTTP query only (no push). Endpoints `/status`, `/preview/latest`, and `/trigger` (manual trigger). Data sources are the runtime result read API (`AppContext.results`, implemented by `OutputManager`). Static resource `web/index.html`.
+  - `/status` supports incremental pull with `since_seq` query param and returns lightweight records (`trigger_seq/result/result_code/duration_ms/triggered_at_ms`) plus `latest_seq/full_snapshot` for client resync.
   - Web layout: left side is the overlay preview occupying most of the area; right side shows runtime time, manual trigger, counters (OK/NG/ERROR/TOTAL, where NG does not include ERROR), history table, and a runtime online indicator.
   - Display logic: when there is no recent result, summary areas show an explicit empty state (e.g., “Idle”). When `result=ERROR` or `TIMEOUT`, `/preview/latest` returns a red SVG placeholder for on-site visibility.
   - Empty-state API: `/preview/latest` returns 404 when no preview exists.
@@ -39,3 +40,4 @@
 - OutputManager: after multiple `publish` calls, last/history/preview remain consistent; an exception in one channel does not affect other channels.
 - HMI: API data are consistent; when there is no preview, `/preview/latest` returns 404.
 - Modbus/TCP/GPIO/CSV: each channel should follow its output semantics and avoid blocking the detect thread; after channel shutdown, no dangling tasks should remain.
+

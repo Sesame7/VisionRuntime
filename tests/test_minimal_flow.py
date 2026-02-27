@@ -45,7 +45,7 @@ def _make_acq_task(frame_id: int, now: datetime) -> AcqTask:
         triggered_at=now,
         source="TEST",
         device_id="mock",
-        t0=time.perf_counter(),
+        start_monotonic_s=time.perf_counter(),
         captured_at=now,
         image=np.zeros((2, 2, 3), dtype=np.uint8),
     )
@@ -77,6 +77,7 @@ def _build_test_runtime():
             write_csv=cfg.output.write_csv,
             detect_timeout_ms=cfg.detect.timeout_ms,
             preview_enabled=cfg.detect.preview_enabled,
+            preview_max_edge=cfg.detect.preview_max_edge,
         ),
         detector=detector,
         trigger_cfg=TriggerConfig(),
@@ -92,13 +93,13 @@ class TestMinimalFlow(unittest.TestCase):
         def _sink(rec, _overlay):
             dropped_ids.append(int(rec.trigger_seq))
 
-        queue_mgr = DetectQueueManager(maxsize=1, result_sink=_sink)
+        detect_queue_mgr = DetectQueueManager(maxsize=1, result_sink=_sink)
 
-        queue_mgr.enqueue(_make_acq_task(1, now))
-        queue_mgr.enqueue(_make_acq_task(2, now))
+        detect_queue_mgr.enqueue(_make_acq_task(1, now))
+        detect_queue_mgr.enqueue(_make_acq_task(2, now))
 
-        self.assertEqual(queue_mgr.queue.qsize(), 1)
-        remaining = queue_mgr.queue.get_nowait()
+        self.assertEqual(detect_queue_mgr.queue.qsize(), 1)
+        remaining = detect_queue_mgr.queue.get_nowait()
         self.assertEqual(remaining.frame_id, 2)
         self.assertEqual(dropped_ids, [1])
 

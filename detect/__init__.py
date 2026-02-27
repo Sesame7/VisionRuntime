@@ -3,7 +3,6 @@ from .base import (
     create_detector,
     create_detector_from_loaded_config,
     register_detector,
-    encode_image_jpeg,
 )
 
 __all__ = [
@@ -11,5 +10,4 @@ __all__ = [
     "create_detector",
     "create_detector_from_loaded_config",
     "register_detector",
-    "encode_image_jpeg",
 ]

@@ -13,7 +13,7 @@ import time
 import numpy as np
 
 from camera.base import BaseCamera, CameraConfig, CaptureResult, register_camera
-from camera.save_utils import DailyDirCache, build_dated_frame_path
+from utils.path_time import UtcDailyDirCache, build_dated_frame_path
 
 L = logging.getLogger("vision_runtime.camera.opt")
 
@@ -368,7 +368,7 @@ def _dst_pixel_type(output_pixel_format: str):
     return TARGET_COLOR
 
 
-_DATE_CACHE = DailyDirCache()
+_DATE_CACHE = UtcDailyDirCache()
 
 
 def _process_payload(

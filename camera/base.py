@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Dict, Type
 
 from core.contracts import CaptureResult
-from core.registry import register_named, resolve_registered
+from utils.registry import register_named, resolve_registered
 
 CameraFactory = Dict[str, Type["BaseCamera"]]
 _registry: CameraFactory = {}

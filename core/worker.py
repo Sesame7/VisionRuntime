@@ -9,8 +9,8 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 
 from core.contracts import CaptureResult, OutputRecord
-from core.queue_utils import drain_queue_nowait
-from detect import encode_image_jpeg
+from utils.image_codec import encode_image_jpeg, resize_image_max_edge
+from utils.lifecycle import drain_queue_nowait_with_task_done
 
 L = logging.getLogger("vision_runtime.workers")
 
@@ -66,7 +66,7 @@ class AcqTask:
     triggered_at: datetime
     source: str
     device_id: str
-    t0: float
+    start_monotonic_s: float
     captured_at: datetime
     image: np.ndarray
     grab_ms: Optional[float] = None
@@ -79,10 +79,17 @@ def make_queue_overflow_record(
     triggered_at: datetime,
     captured_at: datetime,
     detected_at: datetime,
+    start_monotonic_s: Optional[float] = None,
     t0: Optional[float] = None,
     remark: str = "queue_overflow",
 ) -> OutputRecord:
-    duration_ms = ((time.perf_counter() - t0) * 1000) if t0 is not None else 0.0
+    if start_monotonic_s is None:
+        start_monotonic_s = t0
+    duration_ms = (
+        (time.perf_counter() - start_monotonic_s) * 1000
+        if start_monotonic_s is not None
+        else 0.0
+    )
     return OutputRecord(
         trigger_seq=frame_id,
         source=source,
@@ -103,13 +110,13 @@ class CameraWorker(BaseWorker):
         self,
         camera,
         trigger_queue: queue.Queue,
-        detect_queue: "DetectQueueManager",
+        detect_queue_mgr: "DetectQueueManager",
         result_sink: Callable[[OutputRecord, Optional[Tuple[bytes, str]]], None],
     ):
         super().__init__("CameraWorker")
         self.camera = camera
         self.trigger_queue = trigger_queue
-        self.detect_mgr = detect_queue
+        self.detect_queue_mgr = detect_queue_mgr
         self.result_sink = result_sink
 
     def run(self):
@@ -120,16 +127,16 @@ class CameraWorker(BaseWorker):
                 continue
             try:
                 source = event.source
-                t0_val = event.monotonic_ms
-                t0 = (
-                    (t0_val / 1000.0)
-                    if isinstance(t0_val, (int, float))
+                start_monotonic_val = event.monotonic_ms
+                start_monotonic_s = (
+                    (start_monotonic_val / 1000.0)
+                    if isinstance(start_monotonic_val, (int, float))
                     else time.perf_counter()
                 )
                 frame_id = int(event.trigger_seq or 0)
                 if frame_id <= 0:
                     raise RuntimeError(
-                        _worker_stage_context(
+                        _format_worker_stage_context(
                             worker="CameraWorker",
                             stage="validate_trigger_event",
                             frame_id=frame_id,
@@ -144,7 +151,7 @@ class CameraWorker(BaseWorker):
                     res = self.camera.capture_once(frame_id, triggered_at=triggered_at)
                 except Exception as e:
                     raise RuntimeError(
-                        _worker_stage_context(
+                        _format_worker_stage_context(
                             worker="CameraWorker",
                             stage="capture",
                             frame_id=frame_id,
@@ -177,7 +184,7 @@ class CameraWorker(BaseWorker):
                         triggered_at=triggered_at,
                         captured_at=captured_at,
                         detected_at=datetime.now(timezone.utc),
-                        duration_ms=(time.perf_counter() - t0) * 1000,
+                        duration_ms=(time.perf_counter() - start_monotonic_s) * 1000,
                     )
                     self.result_sink(rec, None)
                     continue
@@ -187,16 +194,16 @@ class CameraWorker(BaseWorker):
                     triggered_at=triggered_at,
                     source=source,
                     device_id=device_id,
-                    t0=t0,
+                    start_monotonic_s=start_monotonic_s,
                     captured_at=captured_at,
                     image=res.image,
                     grab_ms=(res.timings or {}).get("grab_ms") if res.timings else None,
                 )
                 try:
-                    self.detect_mgr.enqueue(task)
+                    self.detect_queue_mgr.enqueue(task)
                 except Exception as e:
                     raise RuntimeError(
-                        _worker_stage_context(
+                        _format_worker_stage_context(
                             worker="CameraWorker",
                             stage="enqueue_detect",
                             frame_id=frame_id,
@@ -227,7 +234,7 @@ class DetectQueueManager:
                 triggered_at=dropped.triggered_at,
                 captured_at=dropped.captured_at,
                 detected_at=now,
-                t0=dropped.t0,
+                start_monotonic_s=dropped.start_monotonic_s,
                 remark=remark,
             )
             self.result_sink(rec, None)
@@ -242,7 +249,6 @@ class DetectQueueManager:
                 dropped = None
 
             if dropped:
-                _record_drop(dropped)
                 L.warning(
                     "Detect queue overflow: drop_oldest frame=%s src=%s dev=%s qsize=%d/%d",
                     dropped.frame_id,
@@ -251,8 +257,11 @@ class DetectQueueManager:
                     self.queue.qsize(),
                     self.queue.maxsize,
                 )
-                # Mark dropped task as done to keep queue counters consistent.
-                self.queue.task_done()
+                try:
+                    _record_drop(dropped)
+                finally:
+                    # Keep queue counters consistent even if result_sink fails.
+                    self.queue.task_done()
             try:
                 self.queue.put_nowait(task)
                 return
@@ -269,29 +278,31 @@ class DetectQueueManager:
                 )
 
     def clear(self):
-        drain_queue_nowait(self.queue)
+        drain_queue_nowait_with_task_done(self.queue)
 
 
 class DetectWorker(BaseWorker):
     def __init__(
         self,
-        queue_mgr: DetectQueueManager,
+        detect_queue_mgr: DetectQueueManager,
         result_sink: Callable[[OutputRecord, Optional[Tuple[bytes, str]]], None],
         detector,
         timeout_ms: float = 2000.0,
         preview_enabled: bool = True,
+        preview_max_edge: int = 1280,
     ):
         super().__init__("DetectWorker")
-        self.queue_mgr = queue_mgr
+        self.detect_queue_mgr = detect_queue_mgr
         self.result_sink = result_sink
         self.detector = detector
         self.timeout_ms = timeout_ms
         self.preview_enabled = preview_enabled
+        self.preview_max_edge = max(0, int(preview_max_edge))
 
     def run(self):
         while not self._stop_evt.is_set():
             try:
-                task = self.queue_mgr.queue.get(timeout=0.1)
+                task = self.detect_queue_mgr.queue.get(timeout=0.1)
             except queue.Empty:
                 continue
             try:
@@ -301,7 +312,7 @@ class DetectWorker(BaseWorker):
                     ok, message, overlay_img, result_code = self.detector.detect(img)
                 except Exception as e:
                     raise RuntimeError(
-                        _worker_stage_context(
+                        _format_worker_stage_context(
                             worker="DetectWorker",
                             stage="detect",
                             frame_id=task.frame_id,
@@ -320,7 +331,7 @@ class DetectWorker(BaseWorker):
                     triggered_at=task.triggered_at,
                     captured_at=task.captured_at,
                     detected_at=datetime.now(timezone.utc),
-                    duration_ms=(time.perf_counter() - task.t0) * 1000,
+                    duration_ms=(time.perf_counter() - task.start_monotonic_s) * 1000,
                     detect_ms=detect_ms,
                     timeout_ms=self.timeout_ms,
                 )
@@ -332,10 +343,17 @@ class DetectWorker(BaseWorker):
                     and rec.result in ("OK", "NG")
                 ):
                     try:
-                        preview_bytes, preview_mime = _encode_image(overlay_img)
+                        preview_img = resize_image_max_edge(
+                            overlay_img, self.preview_max_edge
+                        )
+                        preview_bytes, preview_mime = encode_image_jpeg(
+                            preview_img,
+                            quality=85,
+                            subsampling=1,
+                        )
                     except Exception as e:
                         raise RuntimeError(
-                            _worker_stage_context(
+                            _format_worker_stage_context(
                                 worker="DetectWorker",
                                 stage="preview_encode",
                                 frame_id=task.frame_id,
@@ -347,7 +365,7 @@ class DetectWorker(BaseWorker):
                         ) from e
                 overlay = (
                     (preview_bytes, preview_mime)
-                    if (preview_bytes and preview_mime)
+                    if (preview_bytes is not None and preview_mime is not None)
                     else None
                 )
                 # Emit per-frame timing at INFO for both OK/NG; TIMEOUT/ERROR at WARNING.
@@ -368,7 +386,7 @@ class DetectWorker(BaseWorker):
                     self.result_sink(rec, overlay)
                 except Exception as e:
                     raise RuntimeError(
-                        _worker_stage_context(
+                        _format_worker_stage_context(
                             worker="DetectWorker",
                             stage="publish",
                             frame_id=task.frame_id,
@@ -379,7 +397,7 @@ class DetectWorker(BaseWorker):
                         )
                     ) from e
             finally:
-                self.queue_mgr.queue.task_done()
+                self.detect_queue_mgr.queue.task_done()
 
 
 def _make_error_output_record(
@@ -455,11 +473,7 @@ def _make_detect_output_record(
     )
 
 
-def _encode_image(img: np.ndarray) -> Tuple[bytes, str]:
-    return encode_image_jpeg(img, quality=85, subsampling=1)
-
-
-def _worker_stage_context(
+def _format_worker_stage_context(
     *,
     worker: str,
     stage: str,

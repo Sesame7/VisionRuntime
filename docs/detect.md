@@ -20,6 +20,7 @@
 
 - The detector may return an overlay image; the worker optionally encodes it as JPEG for HMI preview.
 - Preview encoding is controlled by `detect.preview_enabled`. Overlay generation follows the same switch when creating the detector.
+- `detect.preview_max_edge` limits preview image size by the longest edge (default `1280`, `0` disables downscale). Detection itself still runs on full resolution input.
 - Detect does not persist original images; preview is display-only.
 
 ## 4. DetectWorker Behavior

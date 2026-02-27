@@ -12,7 +12,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from camera.base import BaseCamera, CameraConfig, CaptureResult, register_camera
-from camera.save_utils import DailyDirCache, build_dated_frame_path
+from utils.path_time import UtcDailyDirCache, build_dated_frame_path
 
 L = logging.getLogger("vision_runtime.camera.hik")
 
@@ -506,7 +506,7 @@ def _image_type_from_path(path: str) -> int:
     return MV_Image_Bmp
 
 
-_DATE_CACHE = DailyDirCache()
+_DATE_CACHE = UtcDailyDirCache()
 
 
 def _convert_frame(

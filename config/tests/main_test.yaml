@@ -1,6 +1,6 @@
 runtime:
   save_dir: "data/test"
-  detect_queue_capacity: 50
+  detect_queue_capacity: 10
 
 camera:
   type: "mock"
@@ -19,6 +19,7 @@ detect:
   impl: "overexposure"
   config_file: "../detect_overexposure.yaml"
   preview_enabled: false
+  preview_max_edge: 1280
 
 output:
   hmi:

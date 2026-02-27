@@ -3,6 +3,7 @@ from typing import Tuple
 import numpy as np
 
 from .base import register_detector
+from utils.image_codec import resize_image_max_edge
 
 
 def detect_overexposure(
@@ -44,11 +45,13 @@ class OverExposureDetector:
         params: dict,
         generate_overlay: bool = True,
         input_pixel_format: str | None = None,
+        preview_max_edge: int = 1280,
     ):
         _ = input_pixel_format
         self.threshold = int(params.get("overexp_threshold", 245))
         self.ratio_threshold = float(params.get("overexp_ratio", 0.02))
         self.generate_overlay = generate_overlay
+        self.preview_max_edge = max(0, int(preview_max_edge))
 
     def detect(self, img: np.ndarray):
         ratio, is_ng, overlay = detect_overexposure(
@@ -57,6 +60,8 @@ class OverExposureDetector:
             ratio_threshold=self.ratio_threshold,
             return_overlay=self.generate_overlay,
         )
+        if overlay is not None:
+            overlay = resize_image_max_edge(overlay, self.preview_max_edge)
         prefix = "NG" if is_ng else "OK"
         message = f"{prefix}: overexp_ratio={ratio:.4f} thr={self.threshold} ratio_thr={self.ratio_threshold:.4f}"
         result_code = "DETECT_OVEREXPOSE" if is_ng else "OK"

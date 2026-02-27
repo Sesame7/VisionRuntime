@@ -36,10 +36,11 @@
 
 - Interface: `start()` (bring up the listening thread/task; implementations should document whether it blocks), `stop()` (request stop and wait for exit; re-entrant).
 - Responsibility: after receiving a physical/protocol trigger, invoke the injected `on_trigger(...)` callback. In the current runtime, this callback typically forwards to `TriggerGateway.report_raw_trigger(...)`.
-- Async dependency: if HTTP/Modbus/TCP async servers are needed, they must reuse the shared loop from `core/lifecycle.py` (owned by `SystemRuntime`) and must not create/close private loops.
+- Async dependency: if HTTP/Modbus/TCP async servers are needed, they must reuse the shared loop from `utils/lifecycle.py` (owned by `SystemRuntime`) and must not create/close private loops.
 
 ## 7. Test Points
 
 - Filter rule unit tests: global interval, high-priority cooldown, IP whitelist.
 - Concurrency: when multiple threads call `report_raw_trigger`, `trigger_seq` must increase monotonically and filtering must be correct.
 - End-to-end: after different trigger sources report, generate and enqueue correct `TriggerEvent` objects; time fields satisfy the contract.
+

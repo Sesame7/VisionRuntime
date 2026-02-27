@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from core.contracts import OutputRecord
-from core.lifecycle import LoopRunner
+from utils.lifecycle import LoopRunner
 
 L = logging.getLogger("vision_runtime.output.manager")
 

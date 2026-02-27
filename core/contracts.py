@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 
 
-@dataclass
+@dataclass(slots=True)
 class TriggerEvent:
     trigger_seq: int = 0
     source: str = ""
@@ -14,7 +14,7 @@ class TriggerEvent:
     payload: Any | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class CaptureResult:
     trigger_seq: int = 0
     source: str = ""
@@ -24,10 +24,10 @@ class CaptureResult:
     image: Any | None = None  # runtime np.ndarray
     triggered_at: datetime | None = None
     captured_at: datetime | None = None
-    timings: Dict[str, float] | None = None
+    timings: dict[str, float] | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class OutputRecord:
     trigger_seq: int = 0
     source: str = ""
@@ -37,7 +37,7 @@ class OutputRecord:
     captured_at: datetime | None = None
     detected_at: datetime | None = None
     message: str = ""
-    data: Dict[str, Any] | None = None
+    data: dict[str, Any] | None = None
     # Extensions for current implementation
     result_code: str | None = None
     duration_ms: float | None = None
