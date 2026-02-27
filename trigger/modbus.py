@@ -4,7 +4,7 @@ import asyncio
 from concurrent.futures import CancelledError as FutureCancelledError
 import logging
 
-from core.lifecycle import AsyncTaskOwner, LoopRunner
+from utils.lifecycle import AsyncTaskOwner, LoopRunner
 from trigger.base import BaseTrigger, TriggerConfig, register_trigger
 
 L = logging.getLogger("vision_runtime.trigger.modbus")
@@ -27,7 +27,6 @@ class ModbusTrigger(BaseTrigger):
         self._poll_ms = max(int(poll_ms), 5)
         self._on_reset = on_reset
         self._tasks = AsyncTaskOwner(
-            logger=L,
             owner_name="modbus_trigger",
             loop_runner=loop_runner,
         )

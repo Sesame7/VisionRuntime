@@ -91,7 +91,7 @@ def is_modbus_exception(value: object) -> bool:
     return False
 
 
-def build_server_context(device_ctx: Any) -> Any:
+def build_modbus_server_context(device_ctx: Any) -> Any:
     try:
         return ModbusServerContext(devices=device_ctx, single=True)
     except TypeError:
@@ -108,6 +108,6 @@ __all__ = [
     "ModbusServerContextType",
     "ModbusTcpServer",
     "ModbusTcpServerType",
-    "build_server_context",
+    "build_modbus_server_context",
     "is_modbus_exception",
 ]

@@ -10,12 +10,12 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import List, Tuple
 
-from core.pymodbus_compat import (
+from utils.modbus.pymodbus_compat import (
     ModbusDeviceContext,
     ModbusDeviceContextType,
     ModbusSequentialDataBlock,
     ModbusTcpServer,
-    build_server_context,
+    build_modbus_server_context,
     is_modbus_exception,
 )
 
@@ -200,7 +200,7 @@ async def _run_server(args):
     ir_block = ModbusSequentialDataBlock(ir_base, [0] * 10)
     device_ctx = ModbusDeviceContext(di=di_block, co=coil_block, ir=ir_block, hr=None)
     state = SimState(device_ctx, coil_addr, di_addr, ir_addr)
-    context = build_server_context(device_ctx)
+    context = build_modbus_server_context(device_ctx)
     server = ModbusTcpServer(context, address=(args.host, args.port))
 
     tasks = [

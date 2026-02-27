@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import queue
 import threading
 from collections.abc import Coroutine
 from concurrent.futures import TimeoutError
@@ -67,7 +68,8 @@ class LoopRunner:
             if self._loop and self._thread and self._thread.is_alive():
                 return self._loop
             self._loop = asyncio.new_event_loop()
-            self._loop_ready = threading.Event()
+            ready = threading.Event()
+            self._loop_ready = ready
             self._loop_thread_ident = None
 
             def _runner():
@@ -76,14 +78,12 @@ class LoopRunner:
                     return
                 asyncio.set_event_loop(loop)
                 self._loop_thread_ident = threading.get_ident()
-                if self._loop_ready:
-                    self._loop_ready.set()
+                ready.set()
                 loop.run_forever()
 
             self._thread = threading.Thread(target=_runner, daemon=True)
             self._thread.start()
-            if self._loop_ready:
-                self._loop_ready.wait(timeout=0.5)
+            ready.wait(timeout=0.5)
             return self._loop
 
     def run_async(self, coro: Coroutine[Any, Any, T], timeout: float | None = 0.5) -> T:
@@ -202,11 +202,9 @@ class AsyncTaskOwner:
         *,
         loop_runner: LoopRunner,
         task_reg: Callable[[Any], Any] | None = None,
-        logger: logging.Logger | None = None,
         owner_name: str = "async_service",
     ):
         self._task_reg = task_reg
-        self._logger = logger
         self._owner_name = owner_name
         self._loop_runner = loop_runner
         self._local_tasks: list[Any] = []
@@ -254,8 +252,32 @@ def run_async_cleanup(
     loop_runner.run_async(coro, timeout=timeout)
 
 
+def drain_queue_nowait_with_task_done(
+    q: queue.Queue,
+    *,
+    on_item: Callable[[Any], None] | None = None,
+) -> int:
+    """Drain all currently queued items without blocking.
+
+    Calls `task_done()` for each popped item to keep queue counters consistent.
+    """
+    drained = 0
+    while True:
+        try:
+            item = q.get_nowait()
+        except queue.Empty:
+            return drained
+        try:
+            if on_item is not None:
+                on_item(item)
+        finally:
+            q.task_done()
+        drained += 1
+
+
 __all__ = [
     "LoopRunner",
     "AsyncTaskOwner",
+    "drain_queue_nowait_with_task_done",
     "run_async_cleanup",
 ]

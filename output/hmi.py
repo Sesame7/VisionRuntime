@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from aiohttp import web
 import os
 
-from core.lifecycle import LoopRunner, run_async_cleanup
+from utils.lifecycle import LoopRunner, run_async_cleanup
 from datetime import datetime, timezone
 from core.contracts import OutputRecord
 
@@ -55,33 +55,66 @@ class _ApiServer:
         index_path = self.index_path
         store: ResultReadApi = ctx.results
 
-        def _serialize_record(rec):
-            def _dt(val):
-                if isinstance(val, datetime):
-                    ref = (
-                        val.astimezone(timezone.utc)
-                        if val.tzinfo
-                        else val.replace(tzinfo=timezone.utc)
-                    )
-                    return ref.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-                return val
+        def _to_unix_ms(val: datetime | None) -> int | None:
+            if not isinstance(val, datetime):
+                return None
+            ref = (
+                val.astimezone(timezone.utc)
+                if val.tzinfo
+                else val.replace(tzinfo=timezone.utc)
+            )
+            return int(ref.timestamp() * 1000.0)
 
-            data = rec.__dict__.copy()
-            for key in ("triggered_at", "captured_at", "detected_at"):
-                if key in data:
-                    data[key] = _dt(data[key])
-            return data
+        def _serialize_record(rec):
+            # Keep status payload lean; frontend formats timestamps and other UI fields.
+            return {
+                "trigger_seq": int(rec.trigger_seq or 0),
+                "result": str(rec.result or ""),
+                "result_code": str(rec.result_code or ""),
+                "duration_ms": float(rec.duration_ms or 0.0),
+                "triggered_at_ms": _to_unix_ms(rec.triggered_at),
+            }
+
+        def _parse_since_seq(raw: str | None) -> int | None:
+            if not raw:
+                return None
+            try:
+                val = int(raw)
+            except Exception:
+                return None
+            return val if val >= 0 else None
 
         async def index(_request):
             return web.FileResponse(index_path)
 
         async def status(_request):
-            records = [_serialize_record(r) for r in store.latest_records]
+            latest_records = store.latest_records
+            latest_seq = (
+                int(latest_records[0].trigger_seq or 0) if latest_records else None
+            )
+            since_seq = _parse_since_seq(_request.query.get("since_seq"))
+            full_snapshot = since_seq is None
+            if since_seq is None:
+                filtered_records = latest_records
+            elif latest_seq is not None and latest_seq < since_seq:
+                # Sequence reset likely happened; force client resync.
+                filtered_records = latest_records
+                full_snapshot = True
+            else:
+                filtered_records = [
+                    rec
+                    for rec in latest_records
+                    if int(rec.trigger_seq or 0) > int(since_seq)
+                ]
+
+            records = [_serialize_record(r) for r in filtered_records]
             payload = {
                 "records": records,
                 "stats": store.stats(),
                 "max_records": store.max_records,
                 "heartbeat_seq": store.heartbeat_seq(),
+                "latest_seq": latest_seq,
+                "full_snapshot": full_snapshot,
             }
             return web.json_response(payload)
 

@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Type
-from core.registry import register_named, resolve_registered
+from utils.registry import register_named, resolve_registered
 
 TriggerFactory = Dict[str, Type["BaseTrigger"]]
 _registry: TriggerFactory = {}

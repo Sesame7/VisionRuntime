@@ -3,7 +3,7 @@
 ## 1. Goals and Scope
 
 - Provide a unified wrapper and lifecycle management for core synchronous threads such as camera acquisition and image detection.
-- `SystemRuntime` is responsible for starting/stopping Workers/triggers/output, emitting a lightweight heartbeat, and uses shared async helpers from `core/lifecycle.py`.
+- `SystemRuntime` is responsible for starting/stopping Workers/triggers/output, emitting a lightweight heartbeat, and uses shared async helpers from `utils/lifecycle.py`.
 - Non-goals: do not directly operate camera SDKs / industrial protocol libraries; do not implement Modbus/TCP/HTTP protocol details; do not manage cross-process behavior; no auto-restart in the current implementation.
 
 ## 2. BaseWorker
@@ -47,7 +47,7 @@
   - `SystemRuntime` owns runtime start/stop orchestration for workers, triggers, output channels, camera session entry/exit, queue draining, heartbeat ticking, and shared async-loop shutdown.
   - Output/trigger implementations own their protocol handles/servers, but must not own the global async loop lifecycle.
 - Async loop ownership:
-  - The shared asyncio loop is created via helpers in `core/lifecycle.py` and is closed only by `shutdown_loop()`.
+  - The shared asyncio loop is created via helpers in `utils/lifecycle.py` and is closed only by `shutdown_loop()`.
   - Plugins/channels/triggers must not call `loop.close()` or stop/replace the shared loop directly.
 - Start/stop contracts (component-level):
   - Adapters/channels/triggers should keep `start()` idempotent when practical (safe to call more than once without duplicating resources/tasks).
@@ -79,3 +79,4 @@
 ## 9. Future Extensions
 
 - Optional auto-restart, more Worker concurrency, finer-grained metrics, etc. are future evolutions and are not in the current implementation.
+

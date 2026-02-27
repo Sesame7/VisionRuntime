@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from .base import register_detector
+from utils.image_codec import resize_image_max_edge
 
 
 # Numeric and geometry helpers
@@ -325,9 +326,11 @@ class WeigaoTrayDetector:
         params: dict,
         generate_overlay: bool = True,
         input_pixel_format: str | None = None,
+        preview_max_edge: int = 1280,
     ):
         self.params = params or {}
         self.generate_overlay = bool(generate_overlay)
+        self.preview_max_edge = max(0, int(preview_max_edge))
         if input_pixel_format and input_pixel_format.lower() != "bgr8":
             raise ValueError("weigao_tray requires camera.capture_output_format=bgr8")
 
@@ -359,6 +362,8 @@ class WeigaoTrayDetector:
         )
         self._process_color_band_stage(slots_junction_line_ok, overlay, fail_tracker)
         overlay.render(overlay_img)
+        if overlay_img is not None:
+            overlay_img = resize_image_max_edge(overlay_img, self.preview_max_edge)
         return self._finalize_result(overlay_img, fail_tracker)
 
     def _finalize_result(

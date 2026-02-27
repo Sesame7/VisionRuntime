@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 
 
-def normalize_utc_datetime(value: datetime | None) -> datetime:
+def coerce_utc_datetime(value: datetime | None) -> datetime:
     ref = value or datetime.now(timezone.utc)
     if ref.tzinfo is None:
         ref = ref.replace(tzinfo=timezone.utc)
@@ -14,12 +14,12 @@ def normalize_utc_datetime(value: datetime | None) -> datetime:
 def format_frame_filename(
     frame_id: int | float, ext: str, ts_utc: datetime | None = None
 ) -> str:
-    ref = normalize_utc_datetime(ts_utc)
+    ref = coerce_utc_datetime(ts_utc)
     ts = ref.strftime("%H-%M-%S.%f")[:-3] + "Z"
     return f"{ts}_{int(frame_id):05d}{ext}"
 
 
-class DailyDirCache:
+class UtcDailyDirCache:
     """Cache the current UTC date directory to avoid repeated mkdir/path joins."""
 
     def __init__(self):
@@ -28,7 +28,7 @@ class DailyDirCache:
         self._dir_path: str | None = None
 
     def get_or_create(self, root_dir: str, ts_utc: datetime) -> str:
-        ref = normalize_utc_datetime(ts_utc)
+        ref = coerce_utc_datetime(ts_utc)
         date_key = ref.date().isoformat()
         root_key = os.path.abspath(root_dir)
         if (
@@ -50,18 +50,19 @@ def build_dated_frame_path(
     ext: str,
     *,
     ts_utc: datetime | None,
-    cache: DailyDirCache,
+    cache: UtcDailyDirCache,
 ) -> tuple[str, datetime]:
-    ref = normalize_utc_datetime(ts_utc)
+    ref = coerce_utc_datetime(ts_utc)
     target_dir = cache.get_or_create(root_dir, ref)
-    return os.path.join(
+    file_path = os.path.join(
         target_dir, format_frame_filename(frame_id, ext, ts_utc=ref)
-    ), ref
+    )
+    return file_path, ref
 
 
 __all__ = [
-    "DailyDirCache",
+    "UtcDailyDirCache",
     "build_dated_frame_path",
+    "coerce_utc_datetime",
     "format_frame_filename",
-    "normalize_utc_datetime",
 ]

@@ -138,7 +138,7 @@ For built-in modules, `imports` is usually not required; keep it for custom/exte
 
 ## Optional Tools
 
-- Backup Streamlit HMI: `tools/streamlit_hmi.py`
+- Backup Streamlit HMI: `debug_tools/streamlit_hmi.py`
 - Optional deps: `pip install -r requirements-tools-streamlit.txt`
 
 ## Contributing

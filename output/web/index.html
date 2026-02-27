@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Toplink Vision</title>
+<title>VisionRuntime</title>
 <style>
 body { margin:0; padding:0; font-family:Arial, sans-serif; background:#111; color:#eee; }
 :root { --ok:#6ccf85; --ng:#f05a5a; --err:#ffb020; --panel:#1d1d1d; --panel-strong:#222; --panel-border:#333; --muted:#888; }
@@ -108,6 +108,8 @@ const els = {
 };
 
 let refreshInFlight = false;
+let cachedRecords = [];
+let lastSeenSeq = null;
 
 async function fetchWithTimeout(url, options, timeoutMs){
   const ctrl = new AbortController();
@@ -147,18 +149,31 @@ function renderStats(stats){
   els.statErr.innerText = s.error || 0;
   els.statPass.innerText = (s.pass_rate * 100).toFixed(1);
 }
+
+function toIsoDate(ms){
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function toIsoTime(ms){
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms).toISOString().slice(11, 24) + 'Z';
+}
+
 function renderRecords(records, maxRecords){
-  const showRecs = records.slice(0, maxRecords);
+  const limit = (typeof maxRecords === 'number' && maxRecords > 0) ? maxRecords : records.length;
+  const showRecs = records.slice(0, limit);
   els.tbody.innerHTML = '';
   showRecs.forEach(function(rec){
     const id = rec.trigger_seq || 0;
     const duration = typeof rec.duration_ms==='number' ? rec.duration_ms : 0;
+    const triggeredAtMs = Number(rec.triggered_at_ms);
     const cls = resultClass(rec.result);
     const tr=document.createElement('tr');
     tr.innerHTML = `<td>${String(id).padStart(ID_PAD_LEN,'0')}</td>
                     <td class="${cls}">${rec.result}</td>
-                    <td>${rec.triggered_at ? rec.triggered_at.slice(0,10) : ''}</td>
-                    <td>${rec.triggered_at ? rec.triggered_at.slice(11,24) : ''}</td>
+                    <td>${toIsoDate(triggeredAtMs)}</td>
+                    <td>${toIsoTime(triggeredAtMs)}</td>
                     <td>${duration.toFixed(1)}</td>`;
     els.tbody.appendChild(tr);
   });
@@ -216,7 +231,10 @@ async function refresh(){
   if (refreshInFlight) return;
   refreshInFlight = true;
   try{
-    const r = await fetchWithTimeout('/status', {}, STATUS_TIMEOUT_MS);
+    const statusUrl = (lastSeenSeq === null)
+      ? '/status'
+      : `/status?since_seq=${encodeURIComponent(String(lastSeenSeq))}`;
+    const r = await fetchWithTimeout(statusUrl, {}, STATUS_TIMEOUT_MS);
     if (!r.ok){
       throw new Error(`status_http_${r.status}`);
     }
@@ -224,14 +242,37 @@ async function refresh(){
     els.statusTime.innerText = 'Idle';
     els.statusTime.className = 'status-time';
     const recs = d.records || [];
-    const maxRecords = d.max_records || recs.length;
+    const maxRecords = Number(d.max_records || 0);
+    const fullSnapshot = Boolean(d.full_snapshot);
+    if (fullSnapshot || lastSeenSeq === null){
+      cachedRecords = recs.slice(0, maxRecords > 0 ? maxRecords : recs.length);
+    } else if (recs.length){
+      const seen = new Set(cachedRecords.map(function(rec){ return rec.trigger_seq; }));
+      for (let i = recs.length - 1; i >= 0; i -= 1){
+        const rec = recs[i];
+        const key = rec.trigger_seq;
+        if (!seen.has(key)){
+          cachedRecords.unshift(rec);
+          seen.add(key);
+        }
+      }
+      if (maxRecords > 0 && cachedRecords.length > maxRecords){
+        cachedRecords = cachedRecords.slice(0, maxRecords);
+      }
+    }
+    if (typeof d.latest_seq === 'number' && Number.isFinite(d.latest_seq)){
+      lastSeenSeq = d.latest_seq;
+    } else if (cachedRecords.length){
+      lastSeenSeq = Number(cachedRecords[0].trigger_seq || 0);
+    }
     renderStats(d.stats);
-    const showRecs = renderRecords(recs, maxRecords);
+    const showRecs = renderRecords(cachedRecords, maxRecords);
     if (showRecs.length){
         const r0 = showRecs[0];
         const id0 = r0.trigger_seq || 0;
-        const date0 = r0.triggered_at ? r0.triggered_at.slice(0,10) : '';
-        const time0 = r0.triggered_at ? r0.triggered_at.slice(11,24) : '';
+        const triggeredAtMs = Number(r0.triggered_at_ms);
+        const date0 = toIsoDate(triggeredAtMs);
+        const time0 = toIsoTime(triggeredAtMs);
         const cls0 = resultClass(r0.result);
         els.statusTime.className = `status-time ${cls0}`;
         els.statusTime.innerText = `${String(id0).padStart(ID_PAD_LEN,'_')} ${date0} ${time0}`;

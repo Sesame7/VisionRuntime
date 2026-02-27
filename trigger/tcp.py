@@ -5,7 +5,7 @@ from concurrent.futures import CancelledError as FutureCancelledError
 import logging
 import threading
 
-from core.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
+from utils.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
 from trigger.base import BaseTrigger, TriggerConfig, register_trigger
 
 L = logging.getLogger("vision_runtime.trigger.tcp")
@@ -26,7 +26,6 @@ class TcpTrigger(BaseTrigger):
         self._started = False
         self._state_lock = threading.Lock()
         self._tasks = AsyncTaskOwner(
-            logger=L,
             owner_name="tcp_trigger",
             loop_runner=loop_runner,
         )

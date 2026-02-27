@@ -1,4 +1,4 @@
-# Configuration Design Notes (core/config.py)
+# Configuration Design Notes (core/config/)
 
 ## 1. Goals and Boundaries
 
@@ -81,8 +81,9 @@
   - `config_file`: points to `detect_*.yaml`, validate existence at startup.
   - `timeout_ms`: per-frame detection timeout (unit: ms).
     - Effective behavior: `0` disables timeout classification in the worker. Startup validation requires `>=0`.
-  - Preview control: `preview_enabled`.
-    - Effective behavior: when enabled, detector overlay generation and HMI preview encoding are both enabled in the runtime startup path.
+  - Preview control: `preview_enabled`, `preview_max_edge`.
+    - Effective behavior: when `preview_enabled=true`, detector overlay generation and HMI preview encoding are enabled.
+    - `preview_max_edge` limits preview overlay size by longest edge (default `1280`, `0` means no downscale). Detection path remains full resolution.
 - `output`
   - `output.hmi`: HMI output settings (e.g., `enabled`, `history_size`).
     - `history_size`: number of recent records kept in memory for HMI (startup validation requires `>0`).
@@ -100,5 +101,6 @@
 
 - Data contracts/channels/time semantics: `core/contracts` is the single source of truth.  
 - Backpressure and queues: Detect→Output has no queue. Current runtime also uses a bounded trigger queue before CameraWorker (default capacity `2`, internal parameter, not YAML-configurable yet); `runtime.detect_queue_capacity` controls the Camera→Detect queue.  
-- Async boundary: config contains only business parameters like network/timeouts/retries; threading/loop/shutdown strategy is uniformly managed by `SystemRuntime` (`core/runtime.py`) and shared loop helpers in `core/lifecycle.py`.  
+- Async boundary: config contains only business parameters like network/timeouts/retries; threading/loop/shutdown strategy is uniformly managed by `SystemRuntime` (`core/runtime.py`) and shared loop helpers in `utils/lifecycle.py`.  
 - Trigger/Camera/Detect/Output read their own config blocks and do not parse other modules’ fields.
+

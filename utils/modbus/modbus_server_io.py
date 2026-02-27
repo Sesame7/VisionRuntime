@@ -7,13 +7,13 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Sequence
 
-from core.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
-from core.pymodbus_compat import (
+from utils.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
+from utils.modbus.pymodbus_compat import (
     ModbusDeviceContext,
     ModbusSequentialDataBlock,
     ModbusTcpServer,
     ModbusTcpServerType,
-    build_server_context,
+    build_modbus_server_context,
     is_modbus_exception,
 )
 
@@ -52,8 +52,8 @@ class ModbusIO:
         self.di_offset = max(int(di_offset), 0)
         self.ir_offset = max(int(ir_offset), 0)
         self.heartbeat_ms = max(int(heartbeat_ms), 100)
-        self._state_lock = threading.Lock()
-        self._lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
+        self._data_lock = threading.Lock()
         self._started = False
         self._server: ModbusTcpServerType | None = None
         self._serve_task = None
@@ -61,7 +61,6 @@ class ModbusIO:
         self._heartbeat_stop = threading.Event()
         self._tasks = AsyncTaskOwner(
             task_reg=task_reg,
-            logger=L,
             owner_name="modbus_io",
             loop_runner=loop_runner,
         )
@@ -77,10 +76,10 @@ class ModbusIO:
         self._device_ctx = ModbusDeviceContext(
             di=self._di_block, co=self._coil_block, ir=self._ir_block, hr=None
         )
-        self._context = build_server_context(self._device_ctx)
+        self._context = build_modbus_server_context(self._device_ctx)
 
     def start(self):
-        with self._state_lock:
+        with self._lifecycle_lock:
             if self._started:
                 return
             self._started = True
@@ -97,7 +96,7 @@ class ModbusIO:
                 raise
 
     def stop(self):
-        with self._state_lock:
+        with self._lifecycle_lock:
             if not self._started and self._server is None:
                 return
             self._started = False
@@ -130,14 +129,14 @@ class ModbusIO:
         L.info("Modbus TCP server stopped")
 
     def read_coils(self, offset: int, count: int) -> list[int]:
-        with self._lock:
+        with self._data_lock:
             values = self._device_ctx.getValues(
                 1, self.coil_offset + int(offset), int(count)
             )
             return _require_values(values, count, "coils")
 
     def toggle_di(self, idx: int):
-        with self._lock:
+        with self._data_lock:
             self._toggle_di_locked(idx)
 
     def write_result(
@@ -151,7 +150,7 @@ class ModbusIO:
         ng: int,
         err: int,
     ):
-        with self._lock:
+        with self._data_lock:
             self._write_result_regs_locked(
                 trig_time, seq, result_code, error_code, cycle_ms
             )
@@ -159,7 +158,7 @@ class ModbusIO:
             self._toggle_di_locked(2)  # ST_RESULT_TOGGLE
 
     def reset_outputs(self):
-        with self._lock:
+        with self._data_lock:
             self._set_values_locked(2, self.di_offset + 0, [0] * 6, "di_reset")
             self._set_values_locked(4, self.ir_offset + 0, [0] * 10, "ir_reset")
 
@@ -181,7 +180,7 @@ class ModbusIO:
             await asyncio.sleep(interval_s)
             if self._heartbeat_stop.is_set():
                 break
-            with self._lock:
+            with self._data_lock:
                 self._toggle_di_locked(0)  # ST_HEARTBEAT_TOGGLE
 
     def _set_values_locked(

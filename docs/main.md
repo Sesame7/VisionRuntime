@@ -11,12 +11,13 @@
 ```text
 .
 ├─config/            # main_*.yaml (single-load), detect_*.yaml, example_main_*.yaml, demo detect examples
-├─core/              # runtime.py, worker.py, contracts.py, config.py, modbus_io.py
+├─core/              # runtime.py, worker.py, contracts.py, config.py
 ├─camera/            # base.py + adapters
 ├─detect/            # base.py + detection plugins
 ├─output/            # manager.py, channel implementations, web assets
 ├─trigger/           # base.py, gateway.py, trigger source implementations
-├─tools/             # optional, scripts/helpers
+├─utils/             # shared utility modules (registry, modbus helpers)
+├─debug_tools/       # optional, manual debug/integration scripts
 ├─data/              # runtime outputs (e.g., images/YYYY-MM-DD/* and same-day records.csv)
 ├─logs/              # optional debug/output logs; may be absent or empty in production
 ├─main.py            # entrypoint: load config and start SystemRuntime
@@ -48,7 +49,7 @@
 - Applicable modules: camera / detect / trigger use registry + factory pattern. Output channels are currently wired directly in `build_runtime(...)` (not registry-based).
 - Registration and imports: plugins self-register when the module is imported (e.g., via `register_*` decorators). Registries can be populated either by the optional main-config `imports` preload list or by factory lazy imports of built-in modules. Import failure or missing registration type → startup failure and list available types.
 - Instantiation: instantiate via `create_*` factory based on config; missing required params or type mismatch must raise a clear error.
-- Lifecycle: hot reload is not supported; plugins should not auto-rebuild after close; plugins must not create/close event loops on their own (must reuse `core/lifecycle.py` helpers).
+- Lifecycle: hot reload is not supported; plugins should not auto-rebuild after close; plugins must not create/close event loops on their own (must reuse `utils/lifecycle.py` helpers).
 - Config boundary: config only provides type/imports/paths/required params; field definitions are in `config.md`; plugin internal configs must validate themselves.
 
 ## 7. main Module Design Key Points
@@ -58,3 +59,4 @@
 - Shutdown sequence: receive signal/exception → request each module to stop → wait for Workers/channels to close → call `shutdown_loop()` to close the async loop → exit process; stop/join timeouts can reuse runtime defaults.
 - Logging: follow global `log_level`; production prints to terminal only; during debugging, Output may optionally dump file logs (`logs/`).
 - Exception handling: if config/import/startup fails at any step, exit immediately and print a clear error; uncaught runtime exceptions are caught by main, then trigger an orderly shutdown.
+

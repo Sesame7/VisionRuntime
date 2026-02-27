@@ -55,6 +55,7 @@ detect:
   config_file: "detect_weigao_tray.yaml"
   timeout_ms: 2000
   preview_enabled: true
+  preview_max_edge: 1280
 
 output:
   hmi:

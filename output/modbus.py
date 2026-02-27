@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 from core.contracts import OutputRecord
-from core.modbus_io import ModbusIO
+from utils.modbus.modbus_server_io import ModbusIO
 
 
 class ModbusOutput:
