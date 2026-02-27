@@ -39,7 +39,7 @@ def create_detector(
         package=__package__ or "detect",
         unknown_label="detector impl",
     )
-    kwargs = {"input_pixel_format": input_pixel_format}
+    kwargs: dict[str, object] = {"input_pixel_format": input_pixel_format}
     if _factory_accepts_kwarg(factory, "preview_max_edge"):
         kwargs["preview_max_edge"] = int(preview_max_edge)
     return factory(params or {}, generate_overlay, **kwargs)
