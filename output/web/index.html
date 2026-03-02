@@ -34,7 +34,7 @@ th { position:sticky; top:0; background:var(--panel-strong); }
 .online.ok .dot { background:var(--ok); box-shadow:0 0 6px rgba(108,207,133,0.6); }
 .online.ng .dot { background:var(--ng); box-shadow:0 0 6px rgba(240,90,90,0.6); }
 .title-time { margin-left:0; color:#eee; }
-.status-time { font-size:15px; margin-left:12px; }
+.status-time { font-size:15px; margin-left:13px; }
 </style>
 </head>
 <body>
@@ -157,7 +157,7 @@ function toIsoDate(ms){
 
 function toIsoTime(ms){
   if (!Number.isFinite(ms)) return '';
-  return new Date(ms).toISOString().slice(11, 24) + 'Z';
+  return new Date(ms).toISOString().slice(11, 24);
 }
 
 function renderRecords(records, maxRecords){
