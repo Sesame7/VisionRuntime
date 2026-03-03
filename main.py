@@ -46,10 +46,16 @@ def setup_logging(verbose: bool, log_level: str = ""):
     logging.basicConfig(
         level=level, format="%(asctime)sZ [%(levelname)s] %(message)s", force=True
     )
-    if not verbose:
-        # Silence noisy third-party info logs (e.g., pymodbus internal "Server listening" messages).
-        for name in ("pymodbus", "pymodbus.server", "pymodbus.server.async_io"):
-            logging.getLogger(name).setLevel(logging.WARNING)
+    # Reduce noisy pymodbus polling logs while keeping useful status logs in verbose mode.
+    modbus_log_level = logging.INFO if verbose else logging.WARNING
+    for name in (
+        "pymodbus",
+        "pymodbus.server",
+        "pymodbus.server.async_io",
+        "pymodbus.datastore",
+        "pymodbus.logging",
+    ):
+        logging.getLogger(name).setLevel(modbus_log_level)
 
 
 def build_app(cfg):
