@@ -118,6 +118,9 @@ class CameraWorker(BaseWorker):
         self.trigger_queue = trigger_queue
         self.detect_queue_mgr = detect_queue_mgr
         self.result_sink = result_sink
+        self._state_lock = threading.Lock()
+        self._state_cond = threading.Condition(self._state_lock)
+        self._inflight = 0
 
     def run(self):
         while not self._stop_evt.is_set():
@@ -125,6 +128,8 @@ class CameraWorker(BaseWorker):
                 event = self.trigger_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
+            with self._state_cond:
+                self._inflight += 1
             try:
                 source = event.source
                 start_monotonic_val = event.monotonic_ms
@@ -213,6 +218,17 @@ class CameraWorker(BaseWorker):
                     ) from e
             finally:
                 self.trigger_queue.task_done()
+                with self._state_cond:
+                    self._inflight = max(0, self._inflight - 1)
+                    self._state_cond.notify_all()
+
+    def wait_idle(self, timeout_s: float = 5.0) -> bool:
+        timeout = max(0.0, float(timeout_s))
+        with self._state_cond:
+            return self._state_cond.wait_for(
+                lambda: self._inflight == 0 and self.trigger_queue.empty(),
+                timeout=timeout,
+            )
 
 
 class DetectQueueManager:
@@ -296,6 +312,9 @@ class DetectWorker(BaseWorker):
         self.result_sink = result_sink
         self.detector = detector
         self._detector_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._state_cond = threading.Condition(self._state_lock)
+        self._inflight = 0
         self.timeout_ms = timeout_ms
         self.preview_enabled = preview_enabled
         self.preview_max_edge = max(0, int(preview_max_edge))
@@ -306,6 +325,8 @@ class DetectWorker(BaseWorker):
                 task = self.detect_queue_mgr.queue.get(timeout=0.1)
             except queue.Empty:
                 continue
+            with self._state_cond:
+                self._inflight += 1
             try:
                 img = task.image
                 det_start = time.perf_counter()
@@ -400,10 +421,21 @@ class DetectWorker(BaseWorker):
                     ) from e
             finally:
                 self.detect_queue_mgr.queue.task_done()
+                with self._state_cond:
+                    self._inflight = max(0, self._inflight - 1)
+                    self._state_cond.notify_all()
 
     def replace_detector(self, detector) -> None:
         with self._detector_lock:
             self.detector = detector
+
+    def wait_idle(self, timeout_s: float = 5.0) -> bool:
+        timeout = max(0.0, float(timeout_s))
+        with self._state_cond:
+            return self._state_cond.wait_for(
+                lambda: self._inflight == 0 and self.detect_queue_mgr.queue.empty(),
+                timeout=timeout,
+            )
 
 
 def _make_error_output_record(

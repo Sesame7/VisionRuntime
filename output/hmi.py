@@ -98,6 +98,10 @@ class _ApiServer:
             full_snapshot = since_seq is None
             if since_seq is None:
                 filtered_records = latest_records
+            elif latest_seq is None:
+                # Result store was reset and no new records arrived yet; force resync.
+                filtered_records = latest_records
+                full_snapshot = True
             elif latest_seq is not None and latest_seq < since_seq:
                 # Sequence reset likely happened; force client resync.
                 filtered_records = latest_records
