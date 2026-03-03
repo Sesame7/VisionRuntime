@@ -53,8 +53,11 @@ def validate_config(cfg: LoadedConfig) -> None:
     _require_int("comm.modbus.heartbeat_ms", cfg.comm.modbus.heartbeat_ms, min_v=1)
 
     # detect
+    _require_non_empty_str("detect.recipe_dir", cfg.detect.recipe_dir)
+    _require_non_empty_str("detect.default_recipe", cfg.detect.default_recipe)
     _require_int("detect.timeout_ms", cfg.detect.timeout_ms, min_v=0)
     _require_int("detect.preview_max_edge", cfg.detect.preview_max_edge, min_v=0)
+    _require_int("detect.switch_guard_ms", cfg.detect.switch_guard_ms, min_v=0)
 
 
 def _require_int(
@@ -92,6 +95,13 @@ def _require_str_list(name: str, value: Any) -> list[str]:
         if not isinstance(item, str):
             raise ConfigError(f"{name}[{i}] must be a string")
     return value
+
+
+def _require_non_empty_str(name: str, value: Any) -> str:
+    s = str(value or "").strip()
+    if not s:
+        raise ConfigError(f"{name} must be a non-empty string")
+    return s
 
 
 __all__ = ["validate_config"]

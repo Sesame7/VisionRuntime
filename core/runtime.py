@@ -78,12 +78,18 @@ class ResultReadApi(Protocol):
     def heartbeat_seq(self) -> int | None: ...
 
 
+class RecipeControlApi(Protocol):
+    def recipe_status(self) -> dict[str, Any]: ...
+    def switch_recipe(self, recipe_name: str) -> tuple[bool, str]: ...
+
+
 @dataclass
 class AppContext:
     trigger_gateway: TriggerGateway
     results: ResultReadApi
     detect_queue_mgr: DetectQueueManager
     modbus_io: Optional["ModbusIO"] = None
+    recipe_api: Optional[RecipeControlApi] = None
 
 
 class SystemRuntime:
@@ -108,6 +114,12 @@ class SystemRuntime:
         self._camera_session_stack: ExitStack | None = None
         self._started = False
         self._stopped = False
+        self._recipe_manager: Any | None = None
+        self._recipe_switch_guard_ms: int = 0
+        self._recipe_active: str = ""
+        self._recipe_switching = False
+        self._recipe_last_error: str = ""
+        self._recipe_lock = threading.Lock()
 
     def start(
         self,
@@ -246,6 +258,89 @@ class SystemRuntime:
         if modbus_io:
             modbus_io.reset_outputs()
 
+    def configure_recipe_switching(
+        self, recipe_manager, *, switch_guard_ms: int
+    ) -> None:
+        self._recipe_manager = recipe_manager
+        with self._recipe_lock:
+            self._recipe_switch_guard_ms = max(0, int(switch_guard_ms))
+            self._recipe_active = str(recipe_manager.active_recipe())
+            self._recipe_switching = False
+            self._recipe_last_error = ""
+
+    def recipe_status(self) -> dict[str, Any]:
+        manager = self._recipe_manager
+        with self._recipe_lock:
+            active = self._recipe_active
+            switching = bool(self._recipe_switching)
+            last_error = self._recipe_last_error
+        payload = {
+            "active": active,
+            "switching": switching,
+            "last_error": last_error,
+            "options": [],
+        }
+        if manager is not None:
+            payload["options"] = manager.list_recipes()
+        return payload
+
+    def switch_recipe(self, recipe_name: str) -> tuple[bool, str]:
+        target = str(recipe_name or "").strip()
+        if not target:
+            return False, "recipe name is required"
+        manager = self._recipe_manager
+        if manager is None:
+            return False, "recipe switching is not configured"
+
+        with self._recipe_lock:
+            if self._recipe_switching:
+                return False, "recipe switch already in progress"
+            current = self._recipe_active or str(manager.active_recipe())
+            if target == current:
+                return True, f"recipe already active: {target}"
+            self._recipe_switching = True
+            self._recipe_last_error = ""
+            guard_ms = self._recipe_switch_guard_ms
+
+        t0 = time.perf_counter()
+        L.info(
+            "Recipe switch start from=%s to=%s guard_ms=%d", current, target, guard_ms
+        )
+        self.app_context.trigger_gateway.set_accepting(False)
+        try:
+            if guard_ms > 0:
+                time.sleep(guard_ms / 1000.0)
+            self._drain_trigger_queue()
+            self.app_context.detect_queue_mgr.clear()
+            detector = manager.build_detector_for(target)
+            self.detect_worker.replace_detector(detector)
+            manager.set_active_recipe(target)
+            self.app_context.trigger_gateway.reset()
+            self.output_mgr.reset()
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            with self._recipe_lock:
+                self._recipe_active = target
+                self._recipe_last_error = ""
+            L.info(
+                "Recipe switch success from=%s to=%s elapsed=%.1fms",
+                current,
+                target,
+                elapsed_ms,
+            )
+            return True, f"switched to {target}"
+        except Exception as exc:
+            err = str(exc) or type(exc).__name__
+            with self._recipe_lock:
+                self._recipe_last_error = err
+            L.exception(
+                "Recipe switch failed from=%s to=%s err=%s", current, target, err
+            )
+            return False, err
+        finally:
+            self.app_context.trigger_gateway.set_accepting(True)
+            with self._recipe_lock:
+                self._recipe_switching = False
+
     def _drain_pending_detects(self, reason: str = "SERVICE_STOP"):
         q = self.app_context.detect_queue_mgr.queue
 
@@ -328,6 +423,7 @@ def build_runtime_from_loaded_config(
 
 __all__ = [
     "AppContext",
+    "RecipeControlApi",
     "ResultReadApi",
     "RuntimeBuildConfig",
     "build_runtime_config_from_loaded_config",

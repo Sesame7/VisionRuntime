@@ -5,7 +5,7 @@ This guide covers Linux/Ubuntu and Windows deployments using a release package u
 ## Common configuration notes
 
 - `config/` must contain exactly one `main_*.yaml`.
-- The file referenced by `detect.config_file` must exist.
+- `detect.recipe_dir` must exist and contain YAML recipes, and `detect.default_recipe` must exist in that directory.
 - Set `runtime.save_dir` to an absolute path to keep runtime data outside the release directory.
   - Linux example: `/opt/visionruntime/data`
   - Windows example: `C:\VisionRuntime\data`

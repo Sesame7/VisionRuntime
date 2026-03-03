@@ -81,7 +81,7 @@ See `docs/deploy.md` for a Linux/Ubuntu deployment guide and systemd unit exampl
 
 ## Configuration
 
-Main config must be exactly one file: `config/main_*.yaml` or `config/main_*.yml`. Detect config is referenced by `detect.config_file`.
+Main config must be exactly one file: `config/main_*.yaml` or `config/main_*.yml`. Detection recipes are loaded from `detect.recipe_dir`, with startup default `detect.default_recipe`.
 
 Core sections:
 
@@ -89,7 +89,7 @@ Core sections:
 - `camera`: driver, exposure, image save options
 - `trigger`: debounce + TCP/Modbus settings and filters
 - `comm`: TCP/Modbus/HTTP ports
-- `detect`: detector implementation and config file / preview settings
+- `detect`: detector implementation, recipe directory/default, switch guard, preview settings
 - `output`: HMI/Modbus/CSV switches (including `output.hmi.history_size`)
 
 Camera config is split by implementation: use `camera.common` for shared fields and `camera.<type>` for adapter-specific fields (for example `camera.mock`, `camera.raspi`, `camera.opt`, `camera.hik`).

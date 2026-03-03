@@ -17,9 +17,11 @@ trigger:
 
 detect:
   impl: "overexposure"
-  config_file: "../detect_overexposure.yaml"
+  recipe_dir: "../overexposure"
+  default_recipe: "default.yaml"
   preview_enabled: false
   preview_max_edge: 1280
+  switch_guard_ms: 2000
 
 output:
   hmi:

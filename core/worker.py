@@ -295,6 +295,7 @@ class DetectWorker(BaseWorker):
         self.detect_queue_mgr = detect_queue_mgr
         self.result_sink = result_sink
         self.detector = detector
+        self._detector_lock = threading.Lock()
         self.timeout_ms = timeout_ms
         self.preview_enabled = preview_enabled
         self.preview_max_edge = max(0, int(preview_max_edge))
@@ -309,7 +310,9 @@ class DetectWorker(BaseWorker):
                 img = task.image
                 det_start = time.perf_counter()
                 try:
-                    ok, message, overlay_img, result_code = self.detector.detect(img)
+                    with self._detector_lock:
+                        detector = self.detector
+                    ok, message, overlay_img, result_code = detector.detect(img)
                 except Exception as e:
                     raise RuntimeError(
                         _format_worker_stage_context(
@@ -397,6 +400,10 @@ class DetectWorker(BaseWorker):
                     ) from e
             finally:
                 self.detect_queue_mgr.queue.task_done()
+
+    def replace_detector(self, detector) -> None:
+        with self._detector_lock:
+            self.detector = detector
 
 
 def _make_error_output_record(

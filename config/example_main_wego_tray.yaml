@@ -52,10 +52,12 @@ trigger:
 
 detect:
   impl: "wego_tray"
-  config_file: "detect_wego_tray.yaml"
+  recipe_dir: "wego_tray"
+  default_recipe: "001.yaml"
   timeout_ms: 2000
   preview_enabled: true
   preview_max_edge: 1280
+  switch_guard_ms: 2000
 
 output:
   hmi:
