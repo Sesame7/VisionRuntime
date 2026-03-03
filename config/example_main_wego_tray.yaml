@@ -1,4 +1,4 @@
-# Example main config for the Weigao tray detector.
+# Example main config for the Wego tray detector.
 # Copy/rename to `main_*.yaml` and keep ONLY ONE `main_*.yaml` under config/ to run.
 # `imports` is optional; built-in camera/trigger/detect modules are loaded lazily.
 
@@ -51,8 +51,8 @@ trigger:
     poll_ms: 20
 
 detect:
-  impl: "weigao_tray"
-  config_file: "detect_weigao_tray.yaml"
+  impl: "wego_tray"
+  config_file: "detect_wego_tray.yaml"
   timeout_ms: 2000
   preview_enabled: true
   preview_max_edge: 1280

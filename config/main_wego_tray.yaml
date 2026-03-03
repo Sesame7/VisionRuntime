@@ -59,8 +59,8 @@ trigger:
     poll_ms: 20
 
 detect:
-  impl: "weigao_tray"
-  config_file: "detect_weigao_tray.yaml"
+  impl: "wego_tray"
+  config_file: "detect_wego_tray.yaml"
   timeout_ms: 2000
   preview_enabled: true
   preview_max_edge: 1280

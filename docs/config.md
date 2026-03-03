@@ -16,7 +16,7 @@
 
 - All configs live under `config/`; it stores only files and examples for the current project/site.
 - Main config (single load): recommended naming `config/main_<PROJECT>_<SITE>.yaml`. Loader rule: there must be **exactly 1** `main_*.yml/yaml` in the selected config directory; 0 or >1 → startup failure, and list the discovered files.
-- Main config template: `config/example_main_*.yaml` (e.g. `example_main_weigao_tray.yaml`), for copying only; it is never loaded.
+- Main config template: `config/example_main_*.yaml` (e.g. `example_main_wego_tray.yaml`), for copying only; it is never loaded.
 - Detection config (actual use): `config/detect_<PROJECT>_<SITE>.yaml`, explicitly specified by `detect.config_file` in the main config (typically relative to `config/`; absolute paths are also supported and validated at startup).
 - Detection config examples: `config/detect_overexposure.yaml` (never auto-loaded; examples only).
 - Test main config lives in `config/tests/main_test.yaml` to avoid `main_*.yaml` collisions.

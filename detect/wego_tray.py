@@ -303,10 +303,10 @@ class _DebugOverlayCfg:
     mask_overlay_bgr: Tuple[int, int, int]
 
 
-@register_detector("weigao_tray")
-class WeigaoTrayDetector:
+@register_detector("wego_tray")
+class WegoTrayDetector:
     """
-    Weigao tray inspection (configurable rows/columns), adapted for Smart_Camera.
+    Wego tray inspection (configurable rows/columns), adapted for Smart_Camera.
 
     - Overlay uses input image as the base.
     - Cumulative drawing: green marks keep even if later stages fail.
@@ -332,7 +332,7 @@ class WeigaoTrayDetector:
         self.generate_overlay = bool(generate_overlay)
         self.preview_max_edge = max(0, int(preview_max_edge))
         if input_pixel_format and input_pixel_format.lower() != "bgr8":
-            raise ValueError("weigao_tray requires camera.capture_output_format=bgr8")
+            raise ValueError("wego_tray requires camera.capture_output_format=bgr8")
 
         self._load_params()
 
@@ -1205,4 +1205,4 @@ class WeigaoTrayDetector:
                 fail_tracker.consider("COLOR_BAND_ALIGNMENT_NG", slot.row, slot.col)
 
 
-__all__ = ["WeigaoTrayDetector"]
+__all__ = ["WegoTrayDetector"]
