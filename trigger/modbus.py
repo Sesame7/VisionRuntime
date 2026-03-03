@@ -3,8 +3,9 @@
 import asyncio
 from concurrent.futures import CancelledError as FutureCancelledError
 import logging
+import threading
 
-from utils.lifecycle import AsyncTaskOwner, LoopRunner
+from utils.lifecycle import AsyncTaskOwner, LoopRunner, wait_task_done
 from trigger.base import BaseTrigger, TriggerConfig, register_trigger
 
 L = logging.getLogger("vision_runtime.trigger.modbus")
@@ -31,24 +32,35 @@ class ModbusTrigger(BaseTrigger):
             loop_runner=loop_runner,
         )
         self._task = None
+        self._stopping = False
+        self._state_lock = threading.Lock()
         self._last_cmd_trig = None
         self._last_cmd_reset = None
-        self._last_error = None
 
     def start(self):
-        if self._task:
-            return
-        self._tasks.clear_local_tasks()
-        self._last_error = None
-        self._task = self._tasks.spawn(self._poll_loop())
+        with self._state_lock:
+            if self._task is not None:
+                return
+            self._tasks.clear_local_tasks()
+            self._task = self._tasks.spawn(self._poll_loop())
 
     def stop(self):
-        task = self._task
-        self._task = None
-        if task is None:
-            return
-        self._tasks.cancel_and_clear_local_tasks()
-        L.info("Modbus trigger stopped")
+        with self._state_lock:
+            if self._stopping:
+                return
+            task = self._task
+            self._task = None
+            if task is None:
+                return
+            self._stopping = True
+        try:
+            task.cancel()
+            wait_task_done(task, timeout=0.5, label="modbus_trigger.poll", logger=L)
+            self._tasks.cancel_and_clear_local_tasks()
+            L.info("Modbus trigger stopped")
+        finally:
+            with self._state_lock:
+                self._stopping = False
 
     def raise_if_failed(self):
         task = self._task
@@ -110,7 +122,6 @@ class ModbusTrigger(BaseTrigger):
                             ) from exc
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            self._last_error = exc
+        except Exception:
             L.exception("Modbus trigger poll loop failed")
             raise

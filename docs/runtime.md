@@ -55,8 +55,8 @@
   - Re-entrant `stop()` should be tolerated when practical (especially for output/trigger adapters).
   - `SystemRuntime` itself is intentionally single-use and not restartable.
 - Task ownership and cleanup:
-  - Background tasks created by output-related services should be adopted through `OutputManager.adopt_task(...)` so `OutputManager.stop()` can perform final cancel/await cleanup.
-  - If task registration is unavailable or fails, the component must retain local ownership and clean up its own fallback tasks.
+  - Each adapter/channel owns and cleans up its own background tasks.
+  - Avoid cross-component task adoption to keep shutdown ownership unambiguous.
   - Avoid double ownership of the same task (duplicate cancel/wait calls are usually safe but make shutdown behavior harder to reason about).
 - Shutdown sequencing (runtime-level convention):
   - Stop trigger sources first (prevent new events entering queues).
@@ -68,8 +68,8 @@
   - All waits in shutdown paths should be bounded (thread join, task await, server cleanup).
   - Timeouts are operational safeguards, not a "hard kill" mechanism; on timeout, log a warning and continue shutdown progress when possible.
 - Shutdown observability policy:
-  - Routine shutdown timing diagnostics and pending-task summaries from `shutdown_loop()` are DEBUG-level by default.
-  - Pending-task details remain available in DEBUG (including task/coroutine names) for field diagnostics when needed.
+  - Routine shutdown timing diagnostics are DEBUG-level by default.
+  - `shutdown_loop()` emits pending-task summaries at INFO when residual tasks exist, including task/coroutine names for field diagnostics.
 
 ## 8. Logging and Error Semantics
 
@@ -79,4 +79,3 @@
 ## 9. Future Extensions
 
 - Optional auto-restart, more Worker concurrency, finer-grained metrics, etc. are future evolutions and are not in the current implementation.
-

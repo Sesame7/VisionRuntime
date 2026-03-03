@@ -5,7 +5,11 @@ from concurrent.futures import CancelledError as FutureCancelledError
 import logging
 import threading
 
-from utils.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
+from utils.lifecycle import (
+    AsyncTaskOwner,
+    LoopRunner,
+    wait_task_done,
+)
 from trigger.base import BaseTrigger, TriggerConfig, register_trigger
 
 L = logging.getLogger("vision_runtime.trigger.tcp")
@@ -23,7 +27,7 @@ class TcpTrigger(BaseTrigger):
         super().__init__(cfg, on_trigger)
         self._server = None
         self._serve_task = None
-        self._started = False
+        self._stopping = False
         self._state_lock = threading.Lock()
         self._tasks = AsyncTaskOwner(
             owner_name="tcp_trigger",
@@ -32,9 +36,10 @@ class TcpTrigger(BaseTrigger):
 
     def start(self):
         with self._state_lock:
-            if self._started:
+            if self._stopping:
                 return
-            self._started = True
+            if self._server is not None or self._serve_task is not None:
+                return
         self._tasks.clear_local_tasks()
         try:
             self._tasks.loop_runner.run_async(self._start_server(), timeout=1.0)
@@ -44,22 +49,35 @@ class TcpTrigger(BaseTrigger):
 
     def stop(self):
         with self._state_lock:
-            self._started = False
-        self._serve_task = None
-        self._tasks.cancel_and_clear_local_tasks()
-
-        async def _cleanup():
-            if self._server:
-                self._server.close()
-                await self._server.wait_closed()
+            if self._stopping:
+                return
+            serve_task = self._serve_task
+            self._serve_task = None
+            self._stopping = True
+            server = self._server
             self._server = None
+        try:
+            if serve_task is not None:
+                serve_task.cancel()
+            self._tasks.cancel_local_tasks()
 
-        run_async_cleanup(
-            _cleanup(),
-            timeout=0.5,
-            loop_runner=self._tasks.loop_runner,
-        )
-        L.info("TCP trigger socket stopped")
+            async def _cleanup():
+                if server is not None:
+                    server.close()
+                    await server.wait_closed()
+
+            self._tasks.loop_runner.run_async(_cleanup(), timeout=0.5)
+            wait_task_done(
+                serve_task,
+                timeout=0.5,
+                label="tcp_trigger.serve",
+                logger=L,
+            )
+            self._tasks.clear_local_tasks()
+            L.info("TCP trigger socket stopped")
+        finally:
+            with self._state_lock:
+                self._stopping = False
 
     def raise_if_failed(self):
         task = self._serve_task

@@ -7,7 +7,10 @@ import logging
 import queue
 import threading
 from collections.abc import Coroutine
-from concurrent.futures import TimeoutError
+from concurrent.futures import (
+    CancelledError as FutureCancelledError,
+    TimeoutError as FutureTimeoutError,
+)
 from typing import Any, Callable, TypeVar
 
 # Keep logger name stable with previous shutdown_loop/run_async logs.
@@ -58,7 +61,6 @@ class LoopRunner:
         self._thread: threading.Thread | None = None
         self._stopped = False
         self._lock = threading.Lock()
-        self._loop_ready: threading.Event | None = None
         self._loop_thread_ident: int | None = None
 
     def _ensure_loop(self):
@@ -69,7 +71,6 @@ class LoopRunner:
                 return self._loop
             self._loop = asyncio.new_event_loop()
             ready = threading.Event()
-            self._loop_ready = ready
             self._loop_thread_ident = None
 
             def _runner():
@@ -99,7 +100,7 @@ class LoopRunner:
         fut = asyncio.run_coroutine_threadsafe(coro, loop)
         try:
             return fut.result(timeout=timeout)
-        except TimeoutError:
+        except FutureTimeoutError:
             fut.cancel()
             self._logger.warning("run_async timeout after %.2fs", timeout or 0)
             raise
@@ -155,7 +156,7 @@ class LoopRunner:
                 suffix = ""
                 if len(tasks) > 10:
                     suffix = f" (+{len(tasks) - 10} more)"
-                self._logger.debug(
+                self._logger.info(
                     "shutdown_loop pending_tasks=%d names=%s%s",
                     len(tasks),
                     ", ".join(names),
@@ -173,7 +174,7 @@ class LoopRunner:
             fut = asyncio.run_coroutine_threadsafe(_shutdown(), loop)
             fut.result(timeout=timeout)
             loop.call_soon_threadsafe(loop.stop)
-        except TimeoutError:
+        except FutureTimeoutError:
             fut.cancel()
             loop.call_soon_threadsafe(loop.stop)
             raise
@@ -190,21 +191,18 @@ class LoopRunner:
                 loop.close()
             self._loop = None
             self._thread = None
-            self._loop_ready = None
             self._loop_thread_ident = None
 
 
 class AsyncTaskOwner:
-    """Own background tasks locally unless an external registrar takes ownership."""
+    """Own background tasks locally and provide bulk cancellation helpers."""
 
     def __init__(
         self,
         *,
         loop_runner: LoopRunner,
-        task_reg: Callable[[Any], Any] | None = None,
         owner_name: str = "async_service",
     ):
-        self._task_reg = task_reg
         self._owner_name = owner_name
         self._loop_runner = loop_runner
         self._local_tasks: list[Any] = []
@@ -219,10 +217,6 @@ class AsyncTaskOwner:
     def register(self, task: Any):
         if task is None:
             return None
-        if self._task_reg:
-            adopted = self._task_reg(task)
-            if adopted:
-                return task
         self._local_tasks.append(task)
         return task
 
@@ -242,14 +236,43 @@ class AsyncTaskOwner:
         return self._loop_runner
 
 
-def run_async_cleanup(
-    coro: Coroutine[Any, Any, Any],
+def wait_task_done(
+    task: Any,
     *,
-    loop_runner: LoopRunner,
     timeout: float = 0.5,
-):
-    """Run async cleanup from sync code with a bounded wait."""
-    loop_runner.run_async(coro, timeout=timeout)
+    label: str = "task",
+    logger: logging.Logger | None = None,
+) -> None:
+    """Best-effort wait for task/future completion from sync code."""
+    if task is None:
+        return
+    log = logger or L
+    result_fn = getattr(task, "result", None)
+    if not callable(result_fn):
+        return
+    try:
+        try:
+            result_fn(timeout=timeout)
+            return
+        except TypeError:
+            # asyncio.Task.result() does not accept timeout.
+            done_fn = getattr(task, "done", None)
+            if callable(done_fn) and not bool(done_fn()):
+                cancel_fn = getattr(task, "cancel", None)
+                if callable(cancel_fn):
+                    cancel_fn()
+                return
+            result_fn()
+            return
+    except (asyncio.CancelledError, FutureCancelledError):
+        return
+    except FutureTimeoutError:
+        cancel_fn = getattr(task, "cancel", None)
+        if callable(cancel_fn):
+            cancel_fn()
+        log.warning("%s stop timeout after %.2fs", label, timeout)
+    except Exception:
+        log.exception("%s failed during stop", label)
 
 
 def drain_queue_nowait_with_task_done(
@@ -279,5 +302,5 @@ __all__ = [
     "LoopRunner",
     "AsyncTaskOwner",
     "drain_queue_nowait_with_task_done",
-    "run_async_cleanup",
+    "wait_task_done",
 ]

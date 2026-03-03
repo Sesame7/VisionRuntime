@@ -6,7 +6,9 @@ from core.contracts import OutputRecord
 from utils.modbus.modbus_server_io import ModbusIO
 
 
-class ModbusOutput:
+class ModbusIoLifecycleChannel:
+    """Own ModbusIO service lifecycle independently of result publishing."""
+
     def __init__(self, modbus_io: ModbusIO):
         self.io = modbus_io
 
@@ -15,6 +17,30 @@ class ModbusOutput:
 
     def stop(self):
         self.io.stop()
+
+    def publish(self, rec: OutputRecord, overlay: tuple[bytes, str] | None):
+        _ = rec, overlay
+        return None
+
+    def publish_heartbeat(self, ts: float | None = None):
+        _ = ts
+        return None
+
+    def raise_if_failed(self):
+        return None
+
+
+class ModbusOutput:
+    def __init__(self, modbus_io: ModbusIO):
+        self.io = modbus_io
+
+    def start(self):
+        # ModbusIO lifecycle is owned by ModbusIoLifecycleChannel.
+        return None
+
+    def stop(self):
+        # ModbusIO lifecycle is owned by ModbusIoLifecycleChannel.
+        return None
 
     def publish(self, rec: OutputRecord, overlay: tuple[bytes, str] | None):
         _ = overlay
@@ -90,4 +116,4 @@ def _map_result_bits(rec: OutputRecord) -> tuple[int, int, int]:
     return 0, 1, 1
 
 
-__all__ = ["ModbusOutput"]
+__all__ = ["ModbusIoLifecycleChannel", "ModbusOutput"]

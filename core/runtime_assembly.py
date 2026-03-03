@@ -45,7 +45,7 @@ def _build_trigger_queue() -> queue.Queue:
     return queue.Queue(maxsize=DEFAULT_TRIGGER_QUEUE_CAPACITY)
 
 
-def _build_output_manager(cfg: RuntimeBuildConfig, *, loop_runner: LoopRunner):
+def _build_output_manager(cfg: RuntimeBuildConfig):
     from output.manager import OutputManager, ResultStore
 
     result_store = ResultStore(
@@ -53,7 +53,7 @@ def _build_output_manager(cfg: RuntimeBuildConfig, *, loop_runner: LoopRunner):
         max_records=cfg.history_size,
         write_csv=cfg.write_csv,
     )
-    return OutputManager(result_store, loop_runner=loop_runner)
+    return OutputManager(result_store)
 
 
 def _build_detect_queue_manager(
@@ -146,13 +146,13 @@ def _wire_output_channels(
                 cfg.http_port,
                 app_context,
                 index_path=index_path,
-                task_reg=output_mgr.adopt_task,
                 loop_runner=loop_runner,
             )
         )
 
     if modbus_io_enabled:
         from utils.modbus.modbus_server_io import ModbusIO
+        from output.modbus import ModbusIoLifecycleChannel
 
         modbus_io = ModbusIO(
             cfg.modbus_host,
@@ -161,9 +161,10 @@ def _wire_output_channels(
             di_offset=cfg.di_offset,
             ir_offset=cfg.ir_offset,
             heartbeat_ms=cfg.modbus_heartbeat_ms,
-            task_reg=output_mgr.adopt_task,
             loop_runner=loop_runner,
         )
+        # Modbus server lifecycle is independent from result channel enablement.
+        output_mgr.add_channel(ModbusIoLifecycleChannel(modbus_io))
 
     if modbus_output_enabled and modbus_io:
         from output.modbus import ModbusOutput
@@ -219,7 +220,7 @@ def build_runtime(
         raise ValueError("detector is required")
     trigger_cfg = trigger_cfg or TriggerConfig()
     trigger_queue = _build_trigger_queue()
-    output_mgr = _build_output_manager(cfg, loop_runner=loop_runner)
+    output_mgr = _build_output_manager(cfg)
     detect_queue_mgr = _build_detect_queue_manager(
         cfg, output_mgr_publish=output_mgr.publish
     )
