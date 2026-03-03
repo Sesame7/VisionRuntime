@@ -163,7 +163,7 @@ class LoopRunner:
                     suffix,
                 )
             else:
-                self._logger.debug("shutdown_loop pending_tasks=0")
+                self._logger.info("shutdown_loop pending_tasks=0")
             for t in tasks:
                 t.cancel()
             if tasks:

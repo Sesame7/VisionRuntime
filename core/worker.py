@@ -371,7 +371,7 @@ class DetectWorker(BaseWorker):
                 # Emit per-frame timing at INFO for both OK/NG; TIMEOUT/ERROR at WARNING.
                 log_fn = L.info if rec.result in ("OK", "NG") else L.warning
                 log_fn(
-                    "[%5s] src=%s dev=%s grab=%.2fms detect=%.2fms total=%.2fms result=%s code=%s msg=%s",
+                    "[%5s] src=%s dev=%s grab=%.2fms detect=%.2fms total=%.2fms result=%s msg=%s",
                     task.frame_id,
                     task.source,
                     task.device_id,
@@ -379,7 +379,6 @@ class DetectWorker(BaseWorker):
                     detect_ms,
                     rec.duration_ms or 0.0,
                     rec.result,
-                    rec.result_code or "",
                     rec.message,
                 )
                 try:
