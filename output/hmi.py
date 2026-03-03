@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from aiohttp import web
 import os
 
-from utils.lifecycle import LoopRunner, run_async_cleanup
+from utils.lifecycle import LoopRunner
 from datetime import datetime, timezone
 from core.contracts import OutputRecord
 
@@ -33,7 +33,6 @@ class _ApiServer:
         port: int,
         context: AppContextLike,
         index_path: str,
-        task_reg=None,
         *,
         loop_runner: LoopRunner,
     ):
@@ -47,7 +46,6 @@ class _ApiServer:
         self._site = None
         self._started = False
         self._loop_runner = loop_runner
-        _ = task_reg
 
     def _setup_routes(self):
         app = self.app
@@ -177,11 +175,7 @@ class _ApiServer:
             self._runner = None
             self._site = None
 
-        run_async_cleanup(
-            _cleanup(),
-            timeout=0.5,
-            loop_runner=self._loop_runner,
-        )
+        self._loop_runner.run_async(_cleanup(), timeout=0.5)
         self._started = False
         L.info("HMI web service stopped")
 
@@ -207,7 +201,6 @@ class HmiOutput:
         port: int,
         context: AppContextLike,
         index_path: str,
-        task_reg=None,
         *,
         loop_runner: LoopRunner,
     ):
@@ -216,7 +209,6 @@ class HmiOutput:
             port,
             context,
             index_path=index_path,
-            task_reg=task_reg,
             loop_runner=loop_runner,
         )
 

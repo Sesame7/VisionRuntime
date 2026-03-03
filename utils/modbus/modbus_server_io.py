@@ -7,7 +7,11 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Sequence
 
-from utils.lifecycle import AsyncTaskOwner, LoopRunner, run_async_cleanup
+from utils.lifecycle import (
+    AsyncTaskOwner,
+    LoopRunner,
+    wait_task_done,
+)
 from utils.modbus.pymodbus_compat import (
     ModbusDeviceContext,
     ModbusSequentialDataBlock,
@@ -42,7 +46,6 @@ class ModbusIO:
         di_offset: int,
         ir_offset: int,
         heartbeat_ms: int,
-        task_reg=None,
         *,
         loop_runner: LoopRunner,
     ):
@@ -55,12 +58,12 @@ class ModbusIO:
         self._lifecycle_lock = threading.Lock()
         self._data_lock = threading.Lock()
         self._started = False
+        self._stopping = False
         self._server: ModbusTcpServerType | None = None
         self._serve_task = None
         self._heartbeat_task = None
         self._heartbeat_stop = threading.Event()
         self._tasks = AsyncTaskOwner(
-            task_reg=task_reg,
             owner_name="modbus_io",
             loop_runner=loop_runner,
         )
@@ -97,36 +100,44 @@ class ModbusIO:
 
     def stop(self):
         with self._lifecycle_lock:
+            if self._stopping:
+                return
             if not self._started and self._server is None:
                 return
+            self._stopping = True
             self._started = False
             self._heartbeat_stop.set()
             serve_task = self._serve_task
             heartbeat_task = self._heartbeat_task
+            server = self._server
             self._serve_task = None
             self._heartbeat_task = None
-        for task in (serve_task, heartbeat_task):
-            if task is not None:
-                task.cancel()
+            self._server = None
+        try:
+            # Heartbeat is an internal periodic task; cancel immediately.
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
 
-        async def _cleanup():
-            # Tasks successfully registered via task_reg are owned/cancelled by the
-            # external manager (OutputManager). Only local fallback tasks are
-            # cancelled here.
-            self._tasks.cancel_local_tasks()
-            if self._server:
-                server = self._server
-                server.close()
-                await server.shutdown()
+            # Gracefully stop listener first so accept coroutine can exit cleanly.
+            if server is not None:
 
-        run_async_cleanup(
-            _cleanup(),
-            timeout=0.5,
-            loop_runner=self._tasks.loop_runner,
-        )
-        self._server = None
-        self._tasks.cancel_and_clear_local_tasks()
-        L.info("Modbus TCP server stopped")
+                async def _cleanup():
+                    await server.shutdown()
+
+                try:
+                    self._tasks.loop_runner.run_async(_cleanup(), timeout=0.5)
+                except Exception:
+                    L.exception("Modbus server graceful shutdown failed")
+
+            wait_task_done(serve_task, timeout=0.5, label="modbus_io.serve", logger=L)
+            wait_task_done(
+                heartbeat_task, timeout=0.5, label="modbus_io.heartbeat", logger=L
+            )
+            self._tasks.cancel_and_clear_local_tasks()
+            L.info("Modbus TCP server stopped")
+        finally:
+            with self._lifecycle_lock:
+                self._stopping = False
 
     def read_coils(self, offset: int, count: int) -> list[int]:
         with self._data_lock:

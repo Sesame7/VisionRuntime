@@ -1,24 +1,17 @@
 # -- coding: utf-8 --
 """OutputManager: persist results and fan out to output channels."""
 
-import asyncio
 import csv
 import logging
 import os
 import queue
 import threading
 import time
-from concurrent.futures import (
-    CancelledError as ConcurrentCancelledError,
-    Future as ConcurrentFuture,
-    TimeoutError as ConcurrentTimeoutError,
-)
 from collections import deque
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import Protocol
 
 from core.contracts import OutputRecord
-from utils.lifecycle import LoopRunner
 
 L = logging.getLogger("vision_runtime.output.manager")
 
@@ -222,11 +215,9 @@ def _record_date_key(rec: OutputRecord) -> str:
 
 
 class OutputManager:
-    def __init__(self, store: ResultStore, loop_runner: LoopRunner):
+    def __init__(self, store: ResultStore):
         self._store = store
-        self._loop_runner = loop_runner
         self._channels: list[OutputChannel] = []
-        self._tasks: list[asyncio.Task[Any] | ConcurrentFuture[Any]] = []
         self._heartbeat_seq: int = 0
 
     def publish(self, rec: OutputRecord, overlay: tuple[bytes, str] | None):
@@ -256,7 +247,6 @@ class OutputManager:
                     L.exception("Output channel stop failed: %r", ch)
 
         _run_stage("channels", _stop_channels)
-        _run_stage("tasks", self._drain_tasks)
         _run_stage("store", self._store.stop)
 
     def reset(self):
@@ -276,12 +266,6 @@ class OutputManager:
                 continue
             checker()
 
-    def adopt_task(self, task: Any) -> bool:
-        if task is None:
-            return False
-        self._tasks.append(task)
-        return True
-
     # ---- Read API for HMI / Modbus (proxy to internal store) ----
     @property
     def latest_records(self):
@@ -299,49 +283,6 @@ class OutputManager:
 
     def heartbeat_seq(self) -> int | None:
         return self._heartbeat_seq or None
-
-    # ---- Internal helpers ----
-
-    def _drain_tasks(self, timeout: float = 1.0):
-        tasks = self._tasks
-        self._tasks = []
-        if not tasks:
-            return
-        asyncio_tasks: list[asyncio.Task[Any]] = []
-        threadsafe_futs: list[ConcurrentFuture[Any]] = []
-        for t in tasks:
-            t.cancel()
-            if isinstance(t, asyncio.Task):
-                asyncio_tasks.append(t)
-            else:
-                threadsafe_futs.append(t)
-
-        if asyncio_tasks:
-            try:
-                self._loop_runner.run_async(
-                    asyncio.wait(asyncio_tasks, timeout=timeout),
-                    timeout=timeout,
-                )
-            except Exception:
-                L.exception("OutputManager async task drain failed")
-
-        for fut in threadsafe_futs:
-            if fut.done():
-                try:
-                    fut.result()
-                except ConcurrentCancelledError:
-                    continue
-                except Exception:
-                    L.exception("OutputManager background future failed during drain")
-                continue
-            try:
-                fut.result(timeout=timeout)
-            except ConcurrentCancelledError:
-                continue
-            except ConcurrentTimeoutError:
-                L.warning("OutputManager future drain timeout after %.2fs", timeout)
-            except Exception:
-                L.exception("OutputManager background future failed during drain")
 
 
 __all__ = ["ResultStore", "OutputManager", "OutputChannel"]
