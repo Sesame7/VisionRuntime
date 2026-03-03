@@ -104,6 +104,7 @@ const ID_PAD_LEN = 5;
 const STATUS_TIMEOUT_MS = 1200;
 const TRIGGER_TIMEOUT_MS = 1500;
 const RECIPE_SWITCH_TIMEOUT_MS = 12000;
+const RECIPE_REFRESH_VALUE = '__refresh_current__';
 
 const els = {
   img: document.getElementById('img'),
@@ -153,6 +154,7 @@ async function switchRecipe(name){
   const recipe = String(name || '').trim();
   if (!recipe || recipeSwitchInFlight) return;
   recipeSwitchInFlight = true;
+  let switched = false;
   els.recipeSelect.disabled = true;
   try{
     const r = await fetchWithTimeout(
@@ -170,12 +172,18 @@ async function switchRecipe(name){
       const msg = payload.message || `recipe_http_${r.status}`;
       throw new Error(msg);
     }
+    switched = true;
   } catch(e){
     console.error(e);
     if (activeRecipeName){
       els.recipeSelect.value = activeRecipeName;
     }
   } finally {
+    if (switched){
+      cachedRecords = [];
+      lastSeenSeq = null;
+      lastImgId = null;
+    }
     recipeSwitchInFlight = false;
     await refresh();
   }
@@ -196,6 +204,11 @@ function renderRecipes(recipeState){
   }
 
   sel.innerHTML = '';
+  const refreshOpt = document.createElement('option');
+  refreshOpt.value = RECIPE_REFRESH_VALUE;
+  refreshOpt.text = 'Reload';
+  sel.appendChild(refreshOpt);
+
   options.forEach(function(item){
     const name = String(item.name || '');
     if (!name) return;
@@ -380,7 +393,15 @@ async function refresh(){
   }
 }
 els.recipeSelect.addEventListener('change', function(){
-  void switchRecipe(els.recipeSelect.value);
+  const selected = String(els.recipeSelect.value || '');
+  if (selected === RECIPE_REFRESH_VALUE){
+    if (activeRecipeName){
+      els.recipeSelect.value = activeRecipeName;
+      void switchRecipe(activeRecipeName);
+    }
+    return;
+  }
+  void switchRecipe(selected);
 });
 setInterval(tickClock, REFRESH_MS);
 setInterval(refresh, REFRESH_MS);

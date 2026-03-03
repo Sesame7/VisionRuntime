@@ -296,22 +296,29 @@ class SystemRuntime:
             if self._recipe_switching:
                 return False, "recipe switch already in progress"
             current = self._recipe_active or str(manager.active_recipe())
-            if target == current:
-                return True, f"recipe already active: {target}"
             self._recipe_switching = True
             self._recipe_last_error = ""
             guard_ms = self._recipe_switch_guard_ms
 
+        settle_timeout_s = self._recipe_switch_settle_timeout_s(guard_ms)
         t0 = time.perf_counter()
         L.info(
-            "Recipe switch start from=%s to=%s guard_ms=%d", current, target, guard_ms
+            "Recipe switch start from=%s to=%s guard_ms=%d settle_timeout_s=%.2f",
+            current,
+            target,
+            guard_ms,
+            settle_timeout_s,
         )
         self.app_context.trigger_gateway.set_accepting(False)
         try:
             if guard_ms > 0:
                 time.sleep(guard_ms / 1000.0)
             self._drain_trigger_queue()
+            if not self.camera_worker.wait_idle(timeout_s=settle_timeout_s):
+                raise TimeoutError("camera worker did not become idle before switch")
             self.app_context.detect_queue_mgr.clear()
+            if not self.detect_worker.wait_idle(timeout_s=settle_timeout_s):
+                raise TimeoutError("detect worker did not become idle before switch")
             detector = manager.build_detector_for(target)
             self.detect_worker.replace_detector(detector)
             manager.set_active_recipe(target)
@@ -340,6 +347,19 @@ class SystemRuntime:
             self.app_context.trigger_gateway.set_accepting(True)
             with self._recipe_lock:
                 self._recipe_switching = False
+
+    def _recipe_switch_settle_timeout_s(self, guard_ms: int) -> float:
+        guard_s = max(0.0, float(guard_ms) / 1000.0)
+        detect_timeout_s = (
+            max(0.0, float(getattr(self.detect_worker, "timeout_ms", 0.0) or 0.0))
+            / 1000.0
+        )
+        cam_cfg = getattr(getattr(self.camera_worker, "camera", None), "cfg", None)
+        camera_grab_s = (
+            max(0.0, float(getattr(cam_cfg, "grab_timeout_ms", 0.0) or 0.0)) / 1000.0
+        )
+        # Allow one guarded switch window plus the slower in-flight stage and margin.
+        return max(2.0, guard_s + max(detect_timeout_s, camera_grab_s) + 1.0)
 
     def _drain_pending_detects(self, reason: str = "SERVICE_STOP"):
         q = self.app_context.detect_queue_mgr.queue
