@@ -1,6 +1,7 @@
 # -- coding: utf-8 --
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -21,6 +22,9 @@ class AppContextLike(Protocol):
 
     @property
     def results(self) -> "ResultReadApi": ...
+
+    @property
+    def recipe_api(self) -> Any: ...
 
 
 L = logging.getLogger("vision_runtime.output.hmi")
@@ -113,7 +117,14 @@ class _ApiServer:
                 "heartbeat_seq": store.heartbeat_seq(),
                 "latest_seq": latest_seq,
                 "full_snapshot": full_snapshot,
+                "recipe": None,
             }
+            recipe_api = getattr(ctx, "recipe_api", None)
+            if recipe_api is not None:
+                try:
+                    payload["recipe"] = recipe_api.recipe_status()
+                except Exception:
+                    L.exception("Failed to query recipe status")
             return web.json_response(payload)
 
         async def latest_preview(_request):
@@ -144,12 +155,44 @@ class _ApiServer:
             ok = ctx.trigger_gateway.report_raw_trigger("WEB", remote_ip=remote_ip)
             return web.json_response({"accepted": ok})
 
+        async def recipe_select(request):
+            recipe_api = getattr(ctx, "recipe_api", None)
+            if recipe_api is None:
+                return web.json_response(
+                    {"ok": False, "message": "recipe switching unavailable"},
+                    status=404,
+                )
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response(
+                    {"ok": False, "message": "invalid json body"},
+                    status=400,
+                )
+            name = str((body or {}).get("name") or "").strip()
+            if not name:
+                return web.json_response(
+                    {"ok": False, "message": "recipe name is required"},
+                    status=400,
+                )
+            ok, message = await asyncio.to_thread(recipe_api.switch_recipe, name)
+            recipe_payload = None
+            try:
+                recipe_payload = recipe_api.recipe_status()
+            except Exception:
+                L.exception("Failed to query recipe status after switch")
+            return web.json_response(
+                {"ok": bool(ok), "message": str(message), "recipe": recipe_payload},
+                status=200 if ok else 400,
+            )
+
         app.router.add_get("/", index)
         app.router.add_get("/index.html", index)
         app.router.add_static("/static/", os.path.dirname(index_path))
         app.router.add_get("/status", status)
         app.router.add_get("/preview/latest", latest_preview)
         app.router.add_post("/trigger", trigger)
+        app.router.add_post("/recipe/select", recipe_select)
 
     def start(self):
         if self._started:

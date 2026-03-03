@@ -1,7 +1,7 @@
 """Typed config schema blocks shared by loader/validator/runtime."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Dict, List
 
 
 class ConfigError(Exception):
@@ -95,10 +95,12 @@ class CommConfigBlock:
 @dataclass
 class DetectConfigBlock:
     impl: str = "overexposure"
-    config_file: str = ""
+    recipe_dir: str = ""
+    default_recipe: str = ""
     timeout_ms: int = 2000
     preview_enabled: bool = True
     preview_max_edge: int = 1280
+    switch_guard_ms: int = 2000
 
 
 @dataclass
@@ -128,7 +130,6 @@ class LoadedConfig:
     comm: CommConfigBlock
     detect: DetectConfigBlock
     output: OutputConfigBlock
-    detect_params: Dict[str, Any]
     paths: Dict[str, str] = field(default_factory=dict)
 
 

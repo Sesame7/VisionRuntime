@@ -9,7 +9,7 @@
 ## 2. Configuration Layers (3 layers)
 
 - **L1 Built-in defaults**: dataclass default values in code (queue capacity, Modbus heartbeat interval, grab timeout, etc.), project-wide and site-independent.
-- **L2 Site main config (main)**: describes the complete runtime environment of the project + site (runtime/communication/camera/trigger/output/which detection algorithm to use and its config file).
+- **L2 Site main config (main)**: describes the complete runtime environment of the project + site (runtime/communication/camera/trigger/output/which detection algorithm to use and its recipe directory/default).
 - **L3 Detection algorithm parameters (detect)**: frequently tuned detection parameters (thresholds/ROI/switches, etc.). Hot reload is not supported in the current implementation (restart required).
 
 ## 3. Directory and Naming Conventions
@@ -17,8 +17,8 @@
 - All configs live under `config/`; it stores only files and examples for the current project/site.
 - Main config (single load): recommended naming `config/main_<PROJECT>_<SITE>.yaml`. Loader rule: there must be **exactly 1** `main_*.yml/yaml` in the selected config directory; 0 or >1 → startup failure, and list the discovered files.
 - Main config template: `config/example_main_*.yaml` (e.g. `example_main_wego_tray.yaml`), for copying only; it is never loaded.
-- Detection config (actual use): `config/detect_<PROJECT>_<SITE>.yaml`, explicitly specified by `detect.config_file` in the main config (typically relative to `config/`; absolute paths are also supported and validated at startup).
-- Detection config examples: `config/detect_overexposure.yaml` (never auto-loaded; examples only).
+- Detection recipes (actual use): `config/<DETECT_IMPL>/*.yaml`, specified by `detect.recipe_dir` + `detect.default_recipe` in main config (typically relative to `config/`; absolute paths are also supported and validated at startup).
+- Detection recipe examples: `config/overexposure/default.yaml`, `config/wego_tray/001.yaml`.
 - Test main config lives in `config/tests/main_test.yaml` to avoid `main_*.yaml` collisions.
 
 ## 4. Loader Responsibilities and Flow
@@ -26,8 +26,8 @@
 1) Construct the default config object (dataclass), apply known fields, and warn on unknown fields to prevent typos being silently ignored.  
 2) Scan and load the main config `main_*.yaml`, bind blocks into Runtime/Camera/Trigger/Output/Detect metadata, etc.; on validation failure, provide “file + field path”.  
 2.5) Optionally import extra plugin modules according to the `imports` list from the main config (string Python import paths). Import failure is a startup error (must include filename + failing import path). An empty/missing list is allowed because built-in camera/trigger/detect modules can be lazily imported when instantiated, and output channels are assembled directly in runtime wiring.  
-3) Read `detect.config_file` from the main config; load the detection-parameter YAML (typically under `config/`) into `detect_params`.  
-4) Pass the loaded config object to the runtime assembly path; use `detect.impl` to choose the detector implementation and pass `detect_params` to it.  
+3) Read `detect.recipe_dir` + `detect.default_recipe` from main config; validate directory/default recipe metadata (without parsing all recipe params in Loader).  
+4) Pass the loaded config object to runtime assembly; recipe params are parsed/validated by recipe manager and detector construction paths.  
 5) Detection params are not validated here; detectors should validate their own parameters if needed.
 
 ## 5. Configuration Format Rules (Restricted YAML Subset)
@@ -78,7 +78,9 @@
     - `trigger.modbus`: `enabled`, `poll_ms` (`poll_ms` unit: ms; startup validation requires `>0`, and `ModbusTrigger` clamps to `>=5`)
 - `detect`
   - `impl`: detection plugin registry name.
-  - `config_file`: points to `detect_*.yaml`, validate existence at startup.
+  - `recipe_dir`: directory containing recipe YAML files (`.yaml`/`.yml`), validate directory existence at startup.
+  - `default_recipe`: default recipe filename under `recipe_dir`, validate existence and YAML extension at startup.
+  - `switch_guard_ms`: guard delay before applying a runtime recipe switch (unit: ms, `>=0`).
   - `timeout_ms`: per-frame detection timeout (unit: ms).
     - Effective behavior: `0` disables timeout classification in the worker. Startup validation requires `>=0`.
   - Preview control: `preview_enabled`, `preview_max_edge`.
@@ -103,4 +105,3 @@
 - Backpressure and queues: Detect→Output has no queue. Current runtime also uses a bounded trigger queue before CameraWorker (default capacity `2`, internal parameter, not YAML-configurable yet); `runtime.detect_queue_capacity` controls the Camera→Detect queue.  
 - Async boundary: config contains only business parameters like network/timeouts/retries; threading/loop/shutdown strategy is uniformly managed by `SystemRuntime` (`core/runtime.py`) and shared loop helpers in `utils/lifecycle.py`.  
 - Trigger/Camera/Detect/Output read their own config blocks and do not parse other modules’ fields.
-

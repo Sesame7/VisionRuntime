@@ -9,11 +9,11 @@ from camera import build_camera_config, create_camera
 from core.config import load_config
 from core.runtime import RuntimeBuildConfig, build_runtime
 from core.worker import AcqTask, DetectQueueManager
-from detect import create_detector
+from detect import create_detector_from_loaded_config
 from trigger import TriggerConfig
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-DETECT_CONFIG_PATH = os.path.join(REPO_ROOT, "config", "detect_overexposure.yaml")
+DETECT_CONFIG_PATH = os.path.join(REPO_ROOT, "config", "overexposure", "default.yaml")
 TEST_CONFIG_DIR = os.path.join(REPO_ROOT, "config", "tests")
 TEST_IMAGE_DIR = os.path.join(REPO_ROOT, "data", "test")
 
@@ -58,10 +58,8 @@ def _build_test_runtime():
     cfg.camera.image_dir = TEST_IMAGE_DIR
     camera_cfg = build_camera_config(cfg.camera, save_dir=cfg.runtime.save_dir)
     camera = create_camera(cfg.camera.type, camera_cfg)
-    detector = create_detector(
-        cfg.detect.impl,
-        cfg.detect_params or {},
-        generate_overlay=False,
+    detector = create_detector_from_loaded_config(
+        cfg,
         input_pixel_format=cfg.camera.capture_output_format,
     )
     runtime = build_runtime(

@@ -45,17 +45,28 @@ def load_config(config_dir: str = "config") -> LoadedConfig:
     )
     output = _build_output_config(main_data.get("output", {}), main_path)
 
-    if not detect.config_file:
-        raise ConfigError(f"detect.config_file is required in {main_path}")
-    detect_path = detect.config_file
-    if not os.path.isabs(detect_path):
-        detect_path = os.path.join(config_dir, detect_path)
-    if not os.path.exists(detect_path):
-        raise ConfigError(f"Detect config not found: {detect_path}")
-
-    detect_params = _read_yaml(detect_path)
-    if not isinstance(detect_params, dict):
-        raise ConfigError(f"Detect config must be a mapping: {detect_path}")
+    if not detect.recipe_dir:
+        raise ConfigError(f"detect.recipe_dir is required in {main_path}")
+    if not detect.default_recipe:
+        raise ConfigError(f"detect.default_recipe is required in {main_path}")
+    recipe_dir = detect.recipe_dir
+    if not os.path.isabs(recipe_dir):
+        recipe_dir = os.path.join(config_dir, recipe_dir)
+    if not os.path.isdir(recipe_dir):
+        raise ConfigError(f"Detect recipe directory not found: {recipe_dir}")
+    detect_path = os.path.join(recipe_dir, detect.default_recipe)
+    if not os.path.isfile(detect_path):
+        raise ConfigError(
+            "detect.default_recipe not found under detect.recipe_dir: "
+            f"{detect.default_recipe}"
+        )
+    if not _is_yaml_file(detect_path):
+        raise ConfigError(f"detect.default_recipe must be .yaml/.yml: {detect_path}")
+    recipe_files = _find_recipe_files(recipe_dir)
+    if not recipe_files:
+        raise ConfigError(
+            f"No recipe .yaml/.yml found in detect.recipe_dir: {recipe_dir}"
+        )
     return LoadedConfig(
         imports=imports,
         runtime=runtime,
@@ -64,10 +75,12 @@ def load_config(config_dir: str = "config") -> LoadedConfig:
         comm=comm,
         detect=detect,
         output=output,
-        detect_params=detect_params or {},
         paths={
             "main": main_path,
             "detect": detect_path,
+            "recipe_dir": recipe_dir,
+            "default_recipe": detect.default_recipe,
+            "recipe_files": ",".join(recipe_files),
         },
     )
 
@@ -95,6 +108,20 @@ def _read_yaml(path: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ConfigError(f"YAML root must be a mapping: {path}")
     return data
+
+
+def _find_recipe_files(recipe_dir: str) -> list[str]:
+    files = []
+    for entry in sorted(os.listdir(recipe_dir)):
+        path = os.path.join(recipe_dir, entry)
+        if os.path.isfile(path) and _is_yaml_file(path):
+            files.append(entry)
+    return files
+
+
+def _is_yaml_file(path: str) -> bool:
+    lower = str(path).lower()
+    return lower.endswith(".yaml") or lower.endswith(".yml")
 
 
 def _build_dataclass(cls, data: dict[str, Any], main_path: str, section: str):

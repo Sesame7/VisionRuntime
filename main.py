@@ -7,7 +7,7 @@ import time
 from camera import create_camera_from_loaded_config
 from core.config import load_config, validate_config
 from core.runtime import build_runtime_from_loaded_config
-from detect import create_detector_from_loaded_config
+from detect import RecipeManager
 from trigger import (
     build_trigger_config_from_loaded_config,
     create_trigger,
@@ -62,10 +62,15 @@ def build_app(cfg):
     validate_config(cfg)
     _log_startup(cfg)
     camera = create_camera_from_loaded_config(cfg)
-    detector = create_detector_from_loaded_config(
-        cfg,
+    recipe_manager = RecipeManager(
+        impl=cfg.detect.impl,
+        recipe_dir=cfg.paths["recipe_dir"],
+        default_recipe=cfg.detect.default_recipe,
+        preview_enabled=bool(cfg.detect.preview_enabled),
+        preview_max_edge=int(cfg.detect.preview_max_edge),
         input_pixel_format=camera.cfg.output_pixel_format,
     )
+    detector = recipe_manager.build_detector_for(recipe_manager.active_recipe())
     trigger_cfg = build_trigger_config_from_loaded_config(cfg)
     runtime = build_runtime_from_loaded_config(
         camera,
@@ -73,6 +78,11 @@ def build_app(cfg):
         detector=detector,
         trigger_cfg=trigger_cfg,
     )
+    runtime.configure_recipe_switching(
+        recipe_manager,
+        switch_guard_ms=int(cfg.detect.switch_guard_ms),
+    )
+    runtime.app_context.recipe_api = runtime
     triggers = _build_runtime_triggers(cfg, runtime, trigger_cfg)
     runtime_limit_s = _runtime_limit_s(cfg)
     return runtime, triggers, runtime_limit_s
@@ -122,8 +132,10 @@ def _log_startup(cfg) -> None:
         f"{cfg.runtime.max_runtime_s}s" if cfg.runtime.max_runtime_s else "unlimited",
     )
     logging.info(
-        "Config files: main=%s detect=%s",
+        "Config files: main=%s recipe_dir=%s default_recipe=%s recipe_path=%s",
         cfg.paths.get("main"),
+        cfg.paths.get("recipe_dir"),
+        cfg.paths.get("default_recipe"),
         cfg.paths.get("detect"),
     )
 

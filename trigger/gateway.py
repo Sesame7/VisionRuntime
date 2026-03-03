@@ -36,6 +36,7 @@ class TriggerGateway:
         self._lock = threading.Lock()
         self.on_overflow = on_overflow
         self._seq = 0
+        self._accepting = True
 
     def report_raw_trigger(
         self,
@@ -47,6 +48,9 @@ class TriggerGateway:
         dropped = None
         did_overflow = False
         with self._lock:
+            if not self._accepting:
+                L.debug("Reject trigger while gateway is paused: %s", source)
+                return False
             if self.ip_whitelist is not None and source in NETWORK_WHITELIST_SOURCES:
                 remote_ip_str = self._normalize_ip(remote_ip)
                 if remote_ip_str not in self.ip_whitelist:
@@ -125,6 +129,15 @@ class TriggerGateway:
             self.last_accept_ts = 0.0
             self._last_high_pri_ts = 0.0
             self._seq = 0
+
+    def set_accepting(self, enabled: bool):
+        with self._lock:
+            self._accepting = bool(enabled)
+
+    @property
+    def accepting(self) -> bool:
+        with self._lock:
+            return self._accepting
 
     @staticmethod
     def _normalize_ip(remote_ip: object) -> str:
