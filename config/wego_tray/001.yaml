@@ -1,13 +1,13 @@
 slot_layout:
   slots_per_row: [17, 17, 17]
   left_anchors:
-  - { x: 154, y: 66 }
-  - { x: 123, y: 733 }
-  - { x: 104, y: 1419 }
+  - {x: 161, y: 105}
+  - {x: 143, y: 752}
+  - {x: 109, y: 1430}
   right_anchors:
-  - { x: 2740, y: 66 }
-  - { x: 2766, y: 733 }
-  - { x: 2791, y: 1419 }
+  - {x: 2683, y: 105}
+  - {x: 2699, y: 752}
+  - {x: 2727, y: 1430}
   slot_roi: { width_px: 150, height_px: 200 }
 stem:
   hsv: { lower: [10, 120, 50], upper: [50, 255, 255] }
@@ -18,9 +18,9 @@ junction_line:
     y_from_anchor_px: { up: 20, down: 40 }
     x_radius_from_stem_center_px: { outer: 34, inner_exclude: 12 }
   white_by_row:
-    - { s_max: 30, v_min: 130 }
-    - { s_max: 30, v_min: 110 }
-    - { s_max: 30, v_min: 90 }
+    - { s_max: 40, v_min: 130 }
+    - { s_max: 40, v_min: 110 }
+    - { s_max: 40, v_min: 90 }
   split:
     smooth_window_rows: 9
     min_split_rows: { above: 5, below: 5 }
@@ -33,7 +33,7 @@ color_band:
     hue_range: { low: 0, high: 179 }
     saturation: { threshold: 30, smooth_window_cols: 5 }
   width_check_px: { min: 10, max: 0 }
-  alignment_check: { reference_x_shift_px: 11, tolerance_px: 4 }
+  alignment_check: { reference_x_shift_px: 11, tolerance_px: 5 }
 result_overlay: { ok_bgr: [0, 200, 0], ng_bgr: [0, 0, 220], stroke_width_px: 4 }
 debug_overlay:
   slot_layout: false
