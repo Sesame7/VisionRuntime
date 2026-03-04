@@ -118,7 +118,6 @@ class SystemRuntime:
         self._recipe_switch_guard_ms: int = 0
         self._recipe_active: str = ""
         self._recipe_switching = False
-        self._recipe_last_error: str = ""
         self._recipe_lock = threading.Lock()
 
     def start(
@@ -266,18 +265,15 @@ class SystemRuntime:
             self._recipe_switch_guard_ms = max(0, int(switch_guard_ms))
             self._recipe_active = str(recipe_manager.active_recipe())
             self._recipe_switching = False
-            self._recipe_last_error = ""
 
     def recipe_status(self) -> dict[str, Any]:
         manager = self._recipe_manager
         with self._recipe_lock:
             active = self._recipe_active
             switching = bool(self._recipe_switching)
-            last_error = self._recipe_last_error
         payload = {
             "active": active,
             "switching": switching,
-            "last_error": last_error,
             "options": [],
         }
         if manager is not None:
@@ -297,7 +293,6 @@ class SystemRuntime:
                 return False, "recipe switch already in progress"
             current = self._recipe_active or str(manager.active_recipe())
             self._recipe_switching = True
-            self._recipe_last_error = ""
             guard_ms = self._recipe_switch_guard_ms
 
         settle_timeout_s = self._recipe_switch_settle_timeout_s(guard_ms)
@@ -327,7 +322,6 @@ class SystemRuntime:
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
             with self._recipe_lock:
                 self._recipe_active = target
-                self._recipe_last_error = ""
             L.info(
                 "Recipe switch success from=%s to=%s elapsed=%.1fms",
                 current,
@@ -335,14 +329,6 @@ class SystemRuntime:
                 elapsed_ms,
             )
             return True, f"switched to {target}"
-        except Exception as exc:
-            err = str(exc) or type(exc).__name__
-            with self._recipe_lock:
-                self._recipe_last_error = err
-            L.exception(
-                "Recipe switch failed from=%s to=%s err=%s", current, target, err
-            )
-            return False, err
         finally:
             self.app_context.trigger_gateway.set_accepting(True)
             with self._recipe_lock:

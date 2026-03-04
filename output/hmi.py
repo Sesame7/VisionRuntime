@@ -125,10 +125,7 @@ class _ApiServer:
             }
             recipe_api = getattr(ctx, "recipe_api", None)
             if recipe_api is not None:
-                try:
-                    payload["recipe"] = recipe_api.recipe_status()
-                except Exception:
-                    L.exception("Failed to query recipe status")
+                payload["recipe"] = recipe_api.recipe_status()
             return web.json_response(payload)
 
         async def latest_preview(_request):
@@ -180,11 +177,7 @@ class _ApiServer:
                     status=400,
                 )
             ok, message = await asyncio.to_thread(recipe_api.switch_recipe, name)
-            recipe_payload = None
-            try:
-                recipe_payload = recipe_api.recipe_status()
-            except Exception:
-                L.exception("Failed to query recipe status after switch")
+            recipe_payload = recipe_api.recipe_status()
             return web.json_response(
                 {"ok": bool(ok), "message": str(message), "recipe": recipe_payload},
                 status=200 if ok else 400,
