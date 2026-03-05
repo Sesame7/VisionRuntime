@@ -50,6 +50,10 @@ class RuntimeBuildConfig:
     detect_timeout_ms: int = 2000
     preview_enabled: bool = True
     preview_max_edge: int = 1280
+    enable_overlay_archive: bool = False
+    overlay_archive_base_dir: str = "overlay_archive"
+    overlay_archive_default_batch_id: str = "=@NO-BATCH_+"
+    overlay_archive_only_ng: bool = True
 
 
 def build_runtime_config_from_loaded_config(cfg) -> RuntimeBuildConfig:
@@ -83,6 +87,11 @@ class RecipeControlApi(Protocol):
     def switch_recipe(self, recipe_name: str) -> tuple[bool, str]: ...
 
 
+class BatchControlApi(Protocol):
+    def batch_status(self) -> dict[str, Any]: ...
+    def set_batch(self, batch_id: str) -> tuple[bool, str]: ...
+
+
 @dataclass
 class AppContext:
     trigger_gateway: TriggerGateway
@@ -90,6 +99,7 @@ class AppContext:
     detect_queue_mgr: DetectQueueManager
     modbus_io: Optional["ModbusIO"] = None
     recipe_api: Optional[RecipeControlApi] = None
+    batch_api: Optional[BatchControlApi] = None
 
 
 class SystemRuntime:
@@ -429,6 +439,7 @@ def build_runtime_from_loaded_config(
 
 __all__ = [
     "AppContext",
+    "BatchControlApi",
     "RecipeControlApi",
     "ResultReadApi",
     "RuntimeBuildConfig",

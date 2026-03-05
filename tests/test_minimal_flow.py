@@ -104,6 +104,9 @@ class TestMinimalFlow(unittest.TestCase):
     def test_trigger_mock_camera_overexposure(self):
         _assert_test_assets_present()
         runtime = _build_test_runtime()
+        self.assertIsNotNone(runtime.app_context.batch_api)
+        batch_status = runtime.app_context.batch_api.batch_status()  # type: ignore[union-attr]
+        self.assertEqual(batch_status.get("current"), "=@NO-BATCH_+")
 
         runtime.start()
         try:

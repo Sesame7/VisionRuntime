@@ -59,6 +59,21 @@ def validate_config(cfg: LoadedConfig) -> None:
     _require_int("detect.preview_max_edge", cfg.detect.preview_max_edge, min_v=0)
     _require_int("detect.switch_guard_ms", cfg.detect.switch_guard_ms, min_v=0)
 
+    # output.overlay_archive
+    _require_non_empty_str(
+        "output.overlay_archive.base_dir", cfg.output.overlay_archive.base_dir
+    )
+    _require_non_empty_str(
+        "output.overlay_archive.default_batch_id",
+        cfg.output.overlay_archive.default_batch_id,
+    )
+    if bool(cfg.output.overlay_archive.enabled) and not bool(
+        cfg.detect.preview_enabled
+    ):
+        raise ConfigError(
+            "output.overlay_archive.enabled requires detect.preview_enabled=true"
+        )
+
 
 def _require_int(
     name: str, value: Any, *, min_v: int | None = None, max_v: int | None = None

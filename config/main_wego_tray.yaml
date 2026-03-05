@@ -73,4 +73,9 @@ output:
     history_size: 10
   modbus:
     enabled: true
+  overlay_archive:
+    enabled: false
+    base_dir: "overlay_archive"
+    default_batch_id: "=@NO-BATCH_+"
+    only_ng: true
   write_csv: true

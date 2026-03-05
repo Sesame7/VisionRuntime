@@ -37,6 +37,12 @@ def build_runtime_config_from_loaded_config(cfg) -> RuntimeBuildConfig:
         detect_timeout_ms=cfg.detect.timeout_ms,
         preview_enabled=bool(cfg.detect.preview_enabled),
         preview_max_edge=int(cfg.detect.preview_max_edge),
+        enable_overlay_archive=bool(cfg.output.overlay_archive.enabled),
+        overlay_archive_base_dir=str(cfg.output.overlay_archive.base_dir),
+        overlay_archive_default_batch_id=str(
+            cfg.output.overlay_archive.default_batch_id
+        ),
+        overlay_archive_only_ng=bool(cfg.output.overlay_archive.only_ng),
     )
 
 
@@ -134,6 +140,10 @@ def _wire_output_channels(
     modbus_io_enabled = bool(cfg.enable_modbus_trigger or cfg.enable_modbus_output)
     modbus_output_enabled = bool(cfg.enable_modbus_output)
     modbus_io = None
+    from output.overlay_archive import BatchState
+
+    batch_state = BatchState(default_batch_id=cfg.overlay_archive_default_batch_id)
+    app_context.batch_api = batch_state
 
     if cfg.enable_http:
         from output.hmi import HmiOutput
@@ -149,6 +159,21 @@ def _wire_output_channels(
                 loop_runner=loop_runner,
             )
         )
+
+    if cfg.enable_overlay_archive and cfg.preview_enabled:
+        from output.overlay_archive import OverlayArchiveOutput
+
+        archive_base_dir = str(cfg.overlay_archive_base_dir or "").strip()
+        if not archive_base_dir:
+            archive_base_dir = "overlay_archive"
+        if not os.path.isabs(archive_base_dir):
+            archive_base_dir = os.path.join(cfg.save_dir, archive_base_dir)
+        overlay_archive = OverlayArchiveOutput(
+            base_dir=archive_base_dir,
+            batch_state=batch_state,
+            only_ng=cfg.overlay_archive_only_ng,
+        )
+        output_mgr.add_channel(overlay_archive)
 
     if modbus_io_enabled:
         from utils.modbus.modbus_server_io import ModbusIO

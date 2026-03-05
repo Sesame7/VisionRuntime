@@ -115,9 +115,20 @@ class OutputModbusConfigBlock:
 
 
 @dataclass
+class OutputOverlayArchiveConfigBlock:
+    enabled: bool = False
+    base_dir: str = "overlay_archive"
+    default_batch_id: str = "=@NO-BATCH_+"
+    only_ng: bool = True
+
+
+@dataclass
 class OutputConfigBlock:
     hmi: OutputHmiConfigBlock = field(default_factory=OutputHmiConfigBlock)
     modbus: OutputModbusConfigBlock = field(default_factory=OutputModbusConfigBlock)
+    overlay_archive: OutputOverlayArchiveConfigBlock = field(
+        default_factory=OutputOverlayArchiveConfigBlock
+    )
     write_csv: bool = True
 
 
@@ -147,6 +158,7 @@ __all__ = [
     "DetectConfigBlock",
     "OutputHmiConfigBlock",
     "OutputModbusConfigBlock",
+    "OutputOverlayArchiveConfigBlock",
     "OutputConfigBlock",
     "LoadedConfig",
 ]

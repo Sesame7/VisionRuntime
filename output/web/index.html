@@ -35,6 +35,11 @@ th { position:sticky; top:0; background:var(--panel-strong); }
 .online.ng .dot { background:var(--ng); box-shadow:0 0 6px rgba(240,90,90,0.6); }
 .footer-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .footer-row .online { flex:1; min-width:0; }
+.batch-bar { display:flex; align-items:center; gap:8px; }
+.batch-current { flex:1; min-width:0; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; user-select:none; }
+.batch-input { width:140px; height:34px; border:1px solid var(--control-border); border-radius:var(--radius); background:var(--panel-strong); color:#eee; padding:0 10px; font-size:13px; }
+.batch-input::placeholder { color:#888; }
+.batch-set-btn { min-width:60px; height:34px; margin-right:0; padding:0 10px; font-size:13px; }
 .recipe-wrap { display:flex; align-items:center; gap:6px; min-width:0; }
 .recipe-label { font-size:12px; color:var(--muted); white-space:nowrap; user-select:none; }
 .recipe-control { position:relative; min-width:0; }
@@ -93,6 +98,13 @@ th { position:sticky; top:0; background:var(--panel-strong); }
         <tbody></tbody>
       </table>
     </div>
+    <div class="panel" id="batchPanel" hidden>
+      <div class="batch-bar">
+        <span class="batch-current" id="batchCurrent">=@NO-BATCH_+</span>
+        <input id="batchInput" class="batch-input" type="text" maxlength="64" placeholder="New batch">
+        <button id="batchSetBtn" class="btn batch-set-btn" type="button">Set</button>
+      </div>
+    </div>
     <div class="panel">
       <div class="footer-row">
         <div class="online" id="onlineBox">
@@ -117,6 +129,7 @@ const ID_PAD_LEN = 5;
 const STATUS_TIMEOUT_MS = 1200;
 const TRIGGER_TIMEOUT_MS = 1500;
 const RECIPE_SWITCH_TIMEOUT_MS = 12000;
+const BATCH_SWITCH_TIMEOUT_MS = 3000;
 
 const els = {
   img: document.getElementById('img'),
@@ -126,6 +139,10 @@ const els = {
   onlineBox: document.getElementById('onlineBox'),
   onlineText: document.getElementById('onlineText'),
   triggerBtn: document.getElementById('triggerBtn'),
+  batchPanel: document.getElementById('batchPanel'),
+  batchCurrent: document.getElementById('batchCurrent'),
+  batchInput: document.getElementById('batchInput'),
+  batchSetBtn: document.getElementById('batchSetBtn'),
   recipeWrap: document.querySelector('.recipe-wrap'),
   recipeToggle: document.getElementById('recipeToggle'),
   recipeMenu: document.getElementById('recipeMenu'),
@@ -142,6 +159,7 @@ let cachedRecords = [];
 let lastSeenSeq = null;
 let recipeSwitchInFlight = false;
 let recipeMenuOpen = false;
+let batchSwitchInFlight = false;
 
 async function fetchWithTimeout(url, options, timeoutMs){
   const ctrl = new AbortController();
@@ -220,6 +238,50 @@ function toggleRecipeMenu(){
     closeRecipeMenu();
   } else {
     openRecipeMenu();
+  }
+}
+
+function renderBatch(batchState){
+  if (!batchState || typeof batchState !== 'object'){
+    els.batchPanel.hidden = true;
+    return;
+  }
+  els.batchPanel.hidden = false;
+  const current = String(batchState.current || '');
+  els.batchCurrent.innerText = current || '=@NO-BATCH_+';
+  const hasInput = String(els.batchInput.value || '').trim().length > 0;
+  els.batchSetBtn.disabled = batchSwitchInFlight || !hasInput;
+}
+
+async function setBatch(){
+  const name = String(els.batchInput.value || '').trim();
+  if (!name || batchSwitchInFlight){
+    return;
+  }
+  batchSwitchInFlight = true;
+  els.batchSetBtn.disabled = true;
+  try{
+    const r = await fetchWithTimeout(
+      '/batch/select',
+      {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({name: name}),
+      },
+      BATCH_SWITCH_TIMEOUT_MS,
+    );
+    let payload = {};
+    try { payload = await r.json(); } catch(_e) {}
+    if (!r.ok || !payload.ok){
+      const msg = payload.message || `batch_http_${r.status}`;
+      throw new Error(msg);
+    }
+    els.batchInput.value = '';
+  } catch(e){
+    console.error(e);
+  } finally {
+    batchSwitchInFlight = false;
+    await refresh();
   }
 }
 
@@ -472,6 +534,7 @@ function applyStatusPayload(payload){
   renderLatestRecordHeader(showRecs);
   updateHeartbeatOnline(payload.heartbeat_seq);
   renderRecipes(payload.recipe);
+  renderBatch(payload.batch);
 }
 
 async function refresh(){
@@ -493,6 +556,7 @@ async function refresh(){
     staleHeartbeatPolls += 1;
     renderOnline(staleOnlineState());
     renderRecipes(null);
+    renderBatch(null);
   } finally {
     refreshInFlight = false;
   }
@@ -503,6 +567,18 @@ els.triggerBtn.addEventListener('click', function(){
 els.recipeToggle.addEventListener('click', function(ev){
   ev.stopPropagation();
   toggleRecipeMenu();
+});
+els.batchInput.addEventListener('input', function(){
+  renderBatch({current: els.batchCurrent.innerText});
+});
+els.batchInput.addEventListener('keydown', function(ev){
+  if (ev.key === 'Enter'){
+    ev.preventDefault();
+    void setBatch();
+  }
+});
+els.batchSetBtn.addEventListener('click', function(){
+  void setBatch();
 });
 document.addEventListener('click', function(ev){
   if (!els.recipeWrap.contains(ev.target)){

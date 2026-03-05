@@ -90,6 +90,10 @@
   - `output.hmi`: HMI output settings (e.g., `enabled`, `history_size`).
     - `history_size`: number of recent records kept in memory for HMI (startup validation requires `>0`).
   - `output.modbus`: Modbus output settings (e.g., `enabled`).
+  - `output.overlay_archive`: overlay image archive settings.
+    - Fields: `enabled`, `base_dir`, `default_batch_id`, `only_ng`.
+    - Effective behavior: archive writes per-batch folders under `base_dir`; runtime batch can be changed from HMI.
+    - Constraint: `output.overlay_archive.enabled=true` requires `detect.preview_enabled=true`.
   - `write_csv`: enable CSV result writing.
   - Modbus IO: address/offset settings live under `comm.modbus`.
 

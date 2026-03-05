@@ -26,6 +26,9 @@ class AppContextLike(Protocol):
     @property
     def recipe_api(self) -> Any: ...
 
+    @property
+    def batch_api(self) -> Any: ...
+
 
 L = logging.getLogger("vision_runtime.output.hmi")
 
@@ -122,10 +125,14 @@ class _ApiServer:
                 "latest_seq": latest_seq,
                 "full_snapshot": full_snapshot,
                 "recipe": None,
+                "batch": None,
             }
             recipe_api = getattr(ctx, "recipe_api", None)
             if recipe_api is not None:
                 payload["recipe"] = recipe_api.recipe_status()
+            batch_api = getattr(ctx, "batch_api", None)
+            if batch_api is not None:
+                payload["batch"] = batch_api.batch_status()
             return web.json_response(payload)
 
         async def latest_preview(_request):
@@ -183,6 +190,33 @@ class _ApiServer:
                 status=200 if ok else 400,
             )
 
+        async def batch_select(request):
+            batch_api = getattr(ctx, "batch_api", None)
+            if batch_api is None:
+                return web.json_response(
+                    {"ok": False, "message": "batch switching unavailable"},
+                    status=404,
+                )
+            try:
+                body = await request.json()
+            except Exception:
+                return web.json_response(
+                    {"ok": False, "message": "invalid json body"},
+                    status=400,
+                )
+            name = str((body or {}).get("name") or "").strip()
+            if not name:
+                return web.json_response(
+                    {"ok": False, "message": "batch name is required"},
+                    status=400,
+                )
+            ok, message = await asyncio.to_thread(batch_api.set_batch, name)
+            batch_payload = batch_api.batch_status()
+            return web.json_response(
+                {"ok": bool(ok), "message": str(message), "batch": batch_payload},
+                status=200 if ok else 400,
+            )
+
         app.router.add_get("/", index)
         app.router.add_get("/index.html", index)
         app.router.add_static("/static/", os.path.dirname(index_path))
@@ -190,6 +224,7 @@ class _ApiServer:
         app.router.add_get("/preview/latest", latest_preview)
         app.router.add_post("/trigger", trigger)
         app.router.add_post("/recipe/select", recipe_select)
+        app.router.add_post("/batch/select", batch_select)
 
     def start(self):
         if self._started:

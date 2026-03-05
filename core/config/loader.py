@@ -21,6 +21,7 @@ from .schema import (
     OutputConfigBlock,
     OutputHmiConfigBlock,
     OutputModbusConfigBlock,
+    OutputOverlayArchiveConfigBlock,
     RuntimeConfig,
     TriggerConfigBlock,
     TriggerModbusConfigBlock,
@@ -285,7 +286,12 @@ def _build_output_config(data: dict[str, Any], main_path: str) -> OutputConfigBl
     if not isinstance(data, dict):
         raise ConfigError(f"'output' must be a mapping in {main_path}")
     cfg = OutputConfigBlock()
-    _validate_allowed_keys(data, {"hmi", "modbus", "write_csv"}, "output", main_path)
+    _validate_allowed_keys(
+        data,
+        {"hmi", "modbus", "overlay_archive", "write_csv"},
+        "output",
+        main_path,
+    )
     _apply_subblock_dataclasses(
         cfg,
         data,
@@ -294,6 +300,7 @@ def _build_output_config(data: dict[str, Any], main_path: str) -> OutputConfigBl
         block_classes={
             "hmi": OutputHmiConfigBlock,
             "modbus": OutputModbusConfigBlock,
+            "overlay_archive": OutputOverlayArchiveConfigBlock,
         },
     )
     if "write_csv" in data:

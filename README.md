@@ -90,7 +90,7 @@ Core sections:
 - `trigger`: debounce + TCP/Modbus settings and filters
 - `comm`: TCP/Modbus/HTTP ports
 - `detect`: detector implementation, recipe directory/default, switch guard, preview settings
-- `output`: HMI/Modbus/CSV switches (including `output.hmi.history_size`)
+- `output`: HMI/Modbus/CSV switches (including `output.hmi.history_size`) and optional overlay archive (`output.overlay_archive`)
 
 Camera config is split by implementation: use `camera.common` for shared fields and `camera.<type>` for adapter-specific fields (for example `camera.mock`, `camera.raspi`, `camera.opt`, `camera.hik`).
 
