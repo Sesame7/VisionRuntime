@@ -47,6 +47,7 @@ class TriggerGateway:
         now = time.perf_counter()
         dropped = None
         did_overflow = False
+        accepted = False
         with self._lock:
             if not self._accepting:
                 L.debug("Reject trigger while gateway is paused: %s", source)
@@ -88,6 +89,7 @@ class TriggerGateway:
 
             try:
                 self.trigger_queue.put_nowait(event)
+                accepted = True
             except queue.Full:
                 did_overflow = True
                 try:
@@ -96,22 +98,28 @@ class TriggerGateway:
                     dropped = None
                 if dropped is not None:
                     self.trigger_queue.task_done()
-                if dropped and self.on_overflow:
-                    self.on_overflow(dropped)
                 try:
                     self.trigger_queue.put_nowait(event)
+                    accepted = True
                 except queue.Full:
                     L.warning("Trigger queue still full, drop %s", source)
-                    return False
+                    accepted = False
 
-            self._seq = next_seq
-            self.last_accept_ts = now
-            if source in self.high_priority_sources:
-                self._last_high_pri_ts = now
+            if accepted:
+                self._seq = next_seq
+                self.last_accept_ts = now
+                if source in self.high_priority_sources:
+                    self._last_high_pri_ts = now
 
-        if did_overflow:
+        if dropped is not None and self.on_overflow is not None:
+            try:
+                self.on_overflow(dropped)
+            except Exception:
+                L.exception("Trigger overflow callback failed")
+
+        if did_overflow and accepted:
             L.warning("Trigger queue full, dropping oldest and accepting %s", source)
-        return True
+        return accepted
 
     def _is_low_priority_blocked(self, now: float, source: str) -> bool:
         if not self.high_priority_sources or self.high_priority_cooldown_ms <= 0:

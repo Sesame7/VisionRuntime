@@ -54,7 +54,7 @@ class ResultStore:
         if self._writer_thread:
             self._writer_thread.start()
 
-    def stop(self, timeout: float = 1.0):
+    def stop(self, timeout: float = 5.0):
         thread = self._writer_thread
         q = self._write_queue
         if thread is None or q is None:
@@ -223,7 +223,14 @@ class OutputManager:
     def publish(self, rec: OutputRecord, overlay: tuple[bytes, str] | None):
         self._store.submit(rec, overlay)
         for ch in self._channels:
-            ch.publish(rec, overlay)
+            try:
+                ch.publish(rec, overlay)
+            except Exception:
+                L.exception(
+                    "Output channel publish failed: channel=%r trigger_seq=%s",
+                    ch,
+                    rec.trigger_seq,
+                )
 
     def add_channel(self, channel: OutputChannel):
         self._channels.append(channel)
@@ -256,7 +263,14 @@ class OutputManager:
         ts = time.time()
         self._heartbeat_seq += 1
         for ch in self._channels:
-            ch.publish_heartbeat(ts)
+            try:
+                ch.publish_heartbeat(ts)
+            except Exception:
+                L.exception(
+                    "Output channel heartbeat failed: channel=%r seq=%s",
+                    ch,
+                    self._heartbeat_seq,
+                )
 
     def raise_if_failed(self):
         self._store.raise_if_failed()
