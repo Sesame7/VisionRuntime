@@ -43,6 +43,7 @@ class RecipeManager:
 
         self._lock = threading.Lock()
         self._entries: dict[str, _RecipeEntry] = {}
+        self._ordered_names: list[str] = []
         self._active_recipe: str = ""
         self._load_all()
 
@@ -93,6 +94,7 @@ class RecipeManager:
 
         with self._lock:
             self._entries = entries
+            self._ordered_names = names
             self._active_recipe = self.default_recipe
 
     def active_recipe(self) -> str:
@@ -109,7 +111,46 @@ class RecipeManager:
                 raise ValueError(f"recipe is invalid: {name}")
             self._active_recipe = name
 
+    def list_slots(self) -> list[dict[str, Any]]:
+        with self._lock:
+            names = list(self._ordered_names)
+            entries = dict(self._entries)
+        return [
+            {
+                "slot": idx,
+                "name": entries[name].name,
+                "valid": bool(entries[name].valid),
+                "error": str(entries[name].error or ""),
+            }
+            for idx, name in enumerate(names, start=1)
+        ]
+
+    def recipe_count(self) -> int:
+        with self._lock:
+            return len(self._ordered_names)
+
+    def recipe_name_at_slot(self, slot: int) -> str:
+        try:
+            idx = int(slot)
+        except Exception as exc:
+            raise ValueError(f"recipe slot must be an integer: {slot!r}") from exc
+        with self._lock:
+            if idx < 1 or idx > len(self._ordered_names):
+                raise ValueError(f"recipe slot out of range: {idx}")
+            return self._ordered_names[idx - 1]
+
+    def slot_of_recipe(self, recipe_name: str) -> int:
+        name = str(recipe_name)
+        with self._lock:
+            if name not in self._entries:
+                raise ValueError(f"recipe not found: {name}")
+            for idx, recipe in enumerate(self._ordered_names, start=1):
+                if recipe == name:
+                    return idx
+        raise ValueError(f"recipe not found: {name}")
+
     def list_recipes(self) -> list[dict[str, Any]]:
+        """Backward-compatible list shape for legacy call paths."""
         with self._lock:
             entries = list(self._entries.values())
         return [

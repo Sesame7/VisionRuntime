@@ -76,6 +76,7 @@ class CommModbusConfigBlock:
     coil_offset: int = 800
     di_offset: int = 800
     ir_offset: int = 50
+    hr_offset: int = 50
     heartbeat_ms: int = 1000
 
 

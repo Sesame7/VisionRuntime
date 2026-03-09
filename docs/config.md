@@ -41,7 +41,7 @@
 - `comm`
   - `http`: `host`, `port`
   - `tcp`: `host`, `port`
-  - `modbus`: `host`, `port`, `coil_offset`, `di_offset`, `ir_offset`, `heartbeat_ms`
+  - `modbus`: `host`, `port`, `coil_offset`, `di_offset`, `ir_offset`, `hr_offset`, `heartbeat_ms`
     - Units/effective constraints: `heartbeat_ms` is milliseconds (startup validation requires `>0`, and `ModbusIO` further clamps to `>=100`); offsets require `>=0` at startup (and are also clamped to `>=0` in `ModbusIO`).
 - `runtime`
   - `save_dir`: base directory for runtime outputs (images/CSV).

@@ -177,13 +177,20 @@ class _ApiServer:
                     {"ok": False, "message": "invalid json body"},
                     status=400,
                 )
-            name = str((body or {}).get("name") or "").strip()
-            if not name:
+            raw_slot = (body or {}).get("slot")
+            if raw_slot is None:
                 return web.json_response(
-                    {"ok": False, "message": "recipe name is required"},
+                    {"ok": False, "message": "recipe slot is required"},
                     status=400,
                 )
-            ok, message = await asyncio.to_thread(recipe_api.switch_recipe, name)
+            try:
+                slot = int(raw_slot)
+            except Exception:
+                return web.json_response(
+                    {"ok": False, "message": "recipe slot must be an integer"},
+                    status=400,
+                )
+            ok, message = await asyncio.to_thread(recipe_api.switch_recipe_slot, slot)
             recipe_payload = recipe_api.recipe_status()
             return web.json_response(
                 {"ok": bool(ok), "message": str(message), "recipe": recipe_payload},

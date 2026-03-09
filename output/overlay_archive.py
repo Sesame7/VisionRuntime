@@ -13,6 +13,30 @@ from core.contracts import OutputRecord
 L = logging.getLogger("vision_runtime.output.overlay_archive")
 
 _INVALID_BATCH_CHARS = set('<>:"/\\|?*')
+_RESERVED_BASENAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+}
 _STOP_SENTINEL = object()
 
 
@@ -39,20 +63,30 @@ def _ext_from_mime(mime: str | None) -> str:
     return ".jpg"
 
 
-def _validate_batch_name(batch_id: str) -> str:
+def validate_batch_name(batch_id: str) -> str:
     candidate = str(batch_id or "").strip()
     if not candidate:
         raise ValueError("batch name is required")
+    if len(candidate) > 32:
+        raise ValueError("batch name must be <= 32 characters")
     if candidate in {".", ".."}:
         raise ValueError("batch name is invalid")
     if candidate[-1] in {" ", "."}:
         raise ValueError("batch name cannot end with space or '.'")
+    # Keep names portable across Windows/Linux deployments.
+    base_name = candidate.split(".", 1)[0].upper()
+    if base_name in _RESERVED_BASENAMES:
+        raise ValueError(f"batch name is reserved: {base_name}")
     for ch in candidate:
         if ch in _INVALID_BATCH_CHARS:
             raise ValueError(f"batch name contains invalid character: {ch!r}")
         if ord(ch) < 32:
             raise ValueError("batch name contains control characters")
     return candidate
+
+
+# Backward-compatible internal alias for legacy imports.
+_validate_batch_name = validate_batch_name
 
 
 class OverlayArchiveOutput:
@@ -70,14 +104,12 @@ class OverlayArchiveOutput:
         self.queue_capacity = max(1, int(queue_capacity))
         self._queue: queue.Queue[object] = queue.Queue(maxsize=self.queue_capacity)
         self._writer_thread: threading.Thread | None = None
-        self._writer_stop = threading.Event()
 
     def start(self):
         if self._writer_thread is not None:
             return
         os.makedirs(self.base_dir, exist_ok=True)
         os.makedirs(self._batch_dir(self.batch_state.current_batch_id()), exist_ok=True)
-        self._writer_stop.clear()
         self._writer_thread = threading.Thread(
             target=self._writer_loop,
             name="overlay_archive_writer",
@@ -89,7 +121,6 @@ class OverlayArchiveOutput:
         thread = self._writer_thread
         if thread is None:
             return
-        self._writer_stop.set()
         self._enqueue_stop_sentinel()
         thread.join(timeout=timeout)
         if thread.is_alive():
@@ -189,7 +220,7 @@ class BatchState:
         *,
         default_batch_id: str,
     ):
-        self.default_batch_id = _validate_batch_name(default_batch_id)
+        self.default_batch_id = validate_batch_name(default_batch_id)
         self._batch_lock = threading.Lock()
         self._current_batch_id = self.default_batch_id
 
@@ -203,7 +234,7 @@ class BatchState:
 
     def set_batch(self, batch_id: str) -> tuple[bool, str]:
         try:
-            candidate = _validate_batch_name(batch_id)
+            candidate = validate_batch_name(batch_id)
         except ValueError as exc:
             return False, str(exc)
         with self._batch_lock:
@@ -211,9 +242,8 @@ class BatchState:
             if candidate == current:
                 L.info("Batch switch ignored (unchanged) current=%s", current)
                 return True, f"batch unchanged: {candidate}"
-            L.info("Batch switch start from=%s to=%s", current, candidate)
             self._current_batch_id = candidate
-        L.info("Batch switch success from=%s to=%s", current, candidate)
+        L.info("Batch switch from=%s to=%s", current, candidate)
         return True, f"batch set to {candidate}"
 
     def current_batch_id(self) -> str:
@@ -221,4 +251,4 @@ class BatchState:
             return self._current_batch_id
 
 
-__all__ = ["BatchState", "OverlayArchiveOutput"]
+__all__ = ["BatchState", "OverlayArchiveOutput", "validate_batch_name"]

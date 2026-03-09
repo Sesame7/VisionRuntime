@@ -12,7 +12,7 @@
 
 - `TriggerGateway`: filtering / sequence assignment / event generation; owns the internal trigger queue and optional overflow callback; does not persist history.
 - `BaseTrigger` plugin: implementations of each trigger source (tcp/modbus), unified `start/stop` and optional health check (`raise_if_failed()`).
-  - Modbus trigger reads coils (CMD_TRIG_TOGGLE/CMD_RESET) via the shared ModbusIO server and toggles DI on acceptance; no Modbus client is used for DI updates.
+  - Modbus trigger reads coil `CMD_TRIG_TOGGLE` via the shared ModbusIO server and toggles DI on acceptance; recipe switching commands are read from holding registers (`RECIPE_SLOT/RECIPE_SEQ`).
 - HMI web trigger bypasses BaseTrigger and calls `TriggerGateway.report_raw_trigger("WEB", ...)` directly.
 - Multiple trigger sources can be enabled concurrently (e.g., TCP + Modbus).
 
@@ -43,4 +43,3 @@
 - Filter rule unit tests: global interval, high-priority cooldown, IP whitelist.
 - Concurrency: when multiple threads call `report_raw_trigger`, `trigger_seq` must increase monotonically and filtering must be correct.
 - End-to-end: after different trigger sources report, generate and enqueue correct `TriggerEvent` objects; time fields satisfy the contract.
-

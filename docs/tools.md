@@ -10,6 +10,7 @@
 
 - `debug_tools/modbus_read.py`: read Modbus registers to validate Output Modbus mapping.
 - `debug_tools/modbus_write_trigger.py`: write/toggle Modbus trigger coil (CMD_TRIG_TOGGLE).
+- `debug_tools/modbus_write_hr_once.py`: write holding registers once (generic mode or `RECIPE_SLOT/RECIPE_SEQ` shortcut).
 - `debug_tools/modbus_sim_server.py`: Modbus TCP simulator for the v2.2 point table.
 - `debug_tools/tcp_listen.py`: TCP listener to inspect incoming trigger payloads.
 - `debug_tools/tcp_send_once.py`: send one TCP trigger payload.
@@ -30,27 +31,35 @@
 - Quick run: `python debug_tools/modbus_write_trigger.py --host 127.0.0.1 --port 1502`
 - Behavior constraint: write-only; toggles by default if `--value` is omitted.
 
-## 5. tcp_send_once.py
+## 5. modbus_write_hr_once.py
+
+- Purpose: write Modbus holding registers once, typically for recipe command registers (`RECIPE_SLOT` + `RECIPE_SEQ`).
+- Main arguments: `--host`, `--port`, `--device-id`, `--hr-offset`; generic mode uses `--address --values ...`; recipe shortcut uses `--slot --seq`.
+- Quick run (recipe): `python debug_tools/modbus_write_hr_once.py --host 127.0.0.1 --port 1502 --hr-offset 50 --slot 2 --seq 1 --verify`
+- Quick run (generic): `python debug_tools/modbus_write_hr_once.py --host 127.0.0.1 --port 1502 --hr-offset 50 --address 0 --values 2 1 --verify`
+- Behavior constraint: one-shot write, then exit.
+
+## 6. tcp_send_once.py
 
 - Purpose: send a trigger word to a TCP listener (e.g., `debug_tools/tcp_listen.py`).
 - Main arguments: `--host`, `--port`, `--word`.
 - Quick run: `python debug_tools/tcp_send_once.py --host 127.0.0.1 --port 9000`
 - Behavior constraint: single-shot sending by default.
 
-## 6. tcp_listen.py
+## 7. tcp_listen.py
 
 - Purpose: listen on a TCP port and print incoming payloads in hex/text for inspection.
 - Main arguments: `--host`, `--port`, `--max-bytes`, `--max-preview`, `--encoding`, `--no-text`.
 - Quick run: `python debug_tools/tcp_listen.py --host 0.0.0.0 --port 9000`
 - Behavior constraint: passive listener only.
 
-## 7. modbus_sim_server.py
+## 8. modbus_sim_server.py
 
 - Purpose: simulate a Modbus TCP server using the v2.2 point table (coils + DI + IR).
 - Main arguments: `--host`, `--port`, `--coil-offset`, `--di-offset`, `--ir-offset`, `--heartbeat-ms`, `--poll-ms`, `--process-ms`, `--result`.
 - Quick run: `python debug_tools/modbus_sim_server.py --host 0.0.0.0 --port 1502`
 
-## 8. General Notes
+## 9. General Notes
 
 - No production config dependency: all parameters come from CLI with conservative defaults.
 - Do not occupy production ports: host/port should be configurable; defaults should differ from production ports where practical.

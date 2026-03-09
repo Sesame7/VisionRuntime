@@ -6,6 +6,12 @@ import logging
 import threading
 
 from utils.lifecycle import AsyncTaskOwner, LoopRunner, wait_task_done
+from utils.modbus.modbus_server_io import (
+    RECIPE_ACK_ERR,
+    RECIPE_ACK_IDLE,
+    RECIPE_ACK_OK,
+    RECIPE_ACK_RUNNING,
+)
 from trigger.base import BaseTrigger, TriggerConfig, register_trigger
 
 L = logging.getLogger("vision_runtime.trigger.modbus")
@@ -19,14 +25,14 @@ class ModbusTrigger(BaseTrigger):
         on_trigger,
         modbus_io,
         poll_ms: int = 20,
-        on_reset=None,
+        on_recipe_switch=None,
         *,
         loop_runner: LoopRunner,
     ):
         super().__init__(cfg, on_trigger)
         self._io = modbus_io
         self._poll_ms = max(int(poll_ms), 5)
-        self._on_reset = on_reset
+        self._on_recipe_switch = on_recipe_switch
         self._tasks = AsyncTaskOwner(
             owner_name="modbus_trigger",
             loop_runner=loop_runner,
@@ -35,7 +41,7 @@ class ModbusTrigger(BaseTrigger):
         self._stopping = False
         self._state_lock = threading.Lock()
         self._last_cmd_trig = None
-        self._last_cmd_reset = None
+        self._last_recipe_seq = None
 
     def start(self):
         with self._state_lock:
@@ -82,17 +88,27 @@ class ModbusTrigger(BaseTrigger):
             while True:
                 await asyncio.sleep(interval_s)
                 try:
-                    cmds = self._io.read_coils(0, 2)
-                    trig_val, reset_val = int(cmds[0]), int(cmds[1])
+                    cmds = self._io.read_coils(0, 1)
+                    trig_val = int(cmds[0])
+                    recipe_regs = self._io.read_holding_registers(0, 2)
+                    recipe_slot = int(recipe_regs[0])
+                    recipe_seq = int(recipe_regs[1]) & 0xFFFF
                 except Exception as exc:
                     raise RuntimeError(
-                        "ModbusTrigger poll failed stage=read_coils"
+                        "ModbusTrigger poll failed stage=read_inputs"
                     ) from exc
                 last_trig = self._last_cmd_trig
-                last_reset = self._last_cmd_reset
                 if last_trig is None:
                     self._last_cmd_trig = trig_val
-                    self._last_cmd_reset = reset_val
+                    self._last_recipe_seq = recipe_seq
+                    try:
+                        self._io.write_recipe_ack(
+                            seq=recipe_seq, status=RECIPE_ACK_IDLE
+                        )
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "ModbusTrigger poll failed stage=write_recipe_ack_init"
+                        ) from exc
                     continue
 
                 if trig_val != last_trig:
@@ -111,15 +127,51 @@ class ModbusTrigger(BaseTrigger):
                                 "ModbusTrigger poll failed stage=toggle_di"
                             ) from exc
 
-                if reset_val != last_reset:
-                    self._last_cmd_reset = reset_val
-                    if self._on_reset:
+                if recipe_seq != self._last_recipe_seq:
+                    self._last_recipe_seq = recipe_seq
+                    try:
+                        self._io.write_recipe_ack_status(RECIPE_ACK_RUNNING)
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "ModbusTrigger poll failed stage=recipe_ack_running"
+                        ) from exc
+                    ok = False
+                    msg = ""
+                    if self._on_recipe_switch:
                         try:
-                            self._on_reset()
+                            outcome = self._on_recipe_switch(recipe_slot)
+                            if isinstance(outcome, tuple):
+                                ok = bool(outcome[0]) if len(outcome) > 0 else False
+                                msg = str(outcome[1]) if len(outcome) > 1 else ""
+                            else:
+                                ok = bool(outcome)
+                                msg = ""
                         except Exception as exc:
-                            raise RuntimeError(
-                                "ModbusTrigger poll failed stage=on_reset"
-                            ) from exc
+                            msg = str(exc) or type(exc).__name__
+                            ok = False
+                    else:
+                        msg = "recipe switch callback is not configured"
+                    ack_status = RECIPE_ACK_OK if bool(ok) else RECIPE_ACK_ERR
+                    try:
+                        self._io.write_recipe_ack(seq=recipe_seq, status=ack_status)
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "ModbusTrigger poll failed stage=recipe_ack_done"
+                        ) from exc
+                    if ok:
+                        L.info(
+                            "Modbus recipe switch success seq=%d slot=%d msg=%s",
+                            recipe_seq,
+                            recipe_slot,
+                            msg,
+                        )
+                    else:
+                        L.warning(
+                            "Modbus recipe switch failed seq=%d slot=%d msg=%s",
+                            recipe_seq,
+                            recipe_slot,
+                            msg,
+                        )
         except asyncio.CancelledError:
             raise
         except Exception:

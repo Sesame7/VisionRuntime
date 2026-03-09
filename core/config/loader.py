@@ -126,6 +126,10 @@ def _is_yaml_file(path: str) -> bool:
 
 
 def _build_dataclass(cls, data: dict[str, Any], main_path: str, section: str):
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ConfigError(f"'{section}' must be a mapping in {main_path}")
     obj = cls()
     fields = cls.__dataclass_fields__
     for k, v in (data or {}).items():

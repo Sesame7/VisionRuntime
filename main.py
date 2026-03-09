@@ -156,6 +156,9 @@ def _build_runtime_triggers(cfg, runtime, trigger_cfg):
             def on_modbus_trigger(_src):
                 return runtime.app_context.trigger_gateway.report_raw_trigger("MODBUS")
 
+            def on_modbus_recipe_switch(slot: int):
+                return runtime.switch_recipe_slot(slot)
+
             triggers.append(
                 create_trigger(
                     "modbus",
@@ -163,7 +166,7 @@ def _build_runtime_triggers(cfg, runtime, trigger_cfg):
                     on_modbus_trigger,
                     modbus_io=modbus_io,
                     poll_ms=cfg.trigger.modbus.poll_ms,
-                    on_reset=runtime.reset_system,
+                    on_recipe_switch=on_modbus_recipe_switch,
                     loop_runner=runtime.loop_runner,
                 )
             )

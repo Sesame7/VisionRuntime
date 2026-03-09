@@ -45,6 +45,7 @@ class RuntimeBuildConfig:
     coil_offset: int = 800
     di_offset: int = 800
     ir_offset: int = 50
+    hr_offset: int = 50
     modbus_heartbeat_ms: int = 1000
     write_csv: bool = True
     detect_timeout_ms: int = 2000
@@ -84,7 +85,7 @@ class ResultReadApi(Protocol):
 
 class RecipeControlApi(Protocol):
     def recipe_status(self) -> dict[str, Any]: ...
-    def switch_recipe(self, recipe_name: str) -> tuple[bool, str]: ...
+    def switch_recipe_slot(self, slot_command: int) -> tuple[bool, str]: ...
 
 
 class BatchControlApi(Protocol):
@@ -258,7 +259,7 @@ class SystemRuntime:
         )
 
     def reset_system(self):
-        """Reset queues, counters, and cached outputs in response to CMD_RESET."""
+        """Reset queues, counters, and cached outputs with best-effort cleanup."""
         self.app_context.trigger_gateway.reset()
         self._drain_trigger_queue()
         self.app_context.detect_queue_mgr.clear()
@@ -282,13 +283,50 @@ class SystemRuntime:
             active = self._recipe_active
             switching = bool(self._recipe_switching)
         payload = {
-            "active": active,
+            "current_slot": 0,
+            "total_slots": 0,
+            "slots": [],
             "switching": switching,
-            "options": [],
         }
         if manager is not None:
-            payload["options"] = manager.list_recipes()
+            slots = manager.list_slots()
+            payload["slots"] = slots
+            payload["total_slots"] = len(slots)
+            if active:
+                try:
+                    payload["current_slot"] = int(manager.slot_of_recipe(active))
+                except Exception:
+                    payload["current_slot"] = 0
         return payload
+
+    def switch_recipe_slot(self, slot_command: int) -> tuple[bool, str]:
+        manager = self._recipe_manager
+        if manager is None:
+            return False, "recipe switching is not configured"
+        try:
+            command = int(slot_command)
+        except Exception:
+            return False, "recipe slot command must be an integer"
+        if command < 0:
+            return False, "recipe slot command must be >= 0"
+        if command == 0:
+            return True, "recipe switch ignored: slot command is 0"
+
+        total_slots = int(manager.recipe_count())
+        if total_slots <= 0:
+            return False, "no recipes are available"
+        target_slot = ((command - 1) % total_slots) + 1
+        try:
+            target = str(manager.recipe_name_at_slot(target_slot))
+        except Exception as exc:
+            return False, str(exc)
+        try:
+            ok, message = self.switch_recipe(target)
+        except Exception as exc:
+            return False, str(exc) or type(exc).__name__
+        if ok:
+            return True, f"{message} slot={target_slot}"
+        return False, message
 
     def switch_recipe(self, recipe_name: str) -> tuple[bool, str]:
         target = str(recipe_name or "").strip()
@@ -329,6 +367,9 @@ class SystemRuntime:
             manager.set_active_recipe(target)
             self.app_context.trigger_gateway.reset()
             self.output_mgr.reset()
+            modbus_io = self.app_context.modbus_io
+            if modbus_io is not None:
+                modbus_io.reset_outputs()
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
             with self._recipe_lock:
                 self._recipe_active = target

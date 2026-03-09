@@ -33,7 +33,7 @@ def main():
         help="Input register start offset (PDU 0-based)",
     )
     p.add_argument(
-        "--ir-count", type=int, default=10, help="Number of input registers to read"
+        "--ir-count", type=int, default=16, help="Number of input registers to read"
     )
     args = p.parse_args()
 

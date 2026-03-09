@@ -40,6 +40,9 @@ th { position:sticky; top:0; background:var(--panel-strong); }
 .batch-input { width:140px; height:34px; border:1px solid var(--control-border); border-radius:var(--radius); background:var(--panel-strong); color:#eee; padding:0 10px; font-size:13px; }
 .batch-input::placeholder { color:#888; }
 .batch-set-btn { min-width:60px; height:34px; margin-right:0; padding:0 10px; font-size:13px; }
+.batch-msg { margin-top:6px; min-height:16px; font-size:12px; color:var(--muted); }
+.batch-msg.err { color:var(--ng); }
+.batch-msg.success { color:var(--ok); }
 .recipe-wrap { display:flex; align-items:center; gap:6px; min-width:0; }
 .recipe-label { font-size:12px; color:var(--muted); white-space:nowrap; user-select:none; }
 .recipe-control { position:relative; min-width:0; }
@@ -101,9 +104,10 @@ th { position:sticky; top:0; background:var(--panel-strong); }
     <div class="panel" id="batchPanel" hidden>
       <div class="batch-bar">
         <span class="batch-current" id="batchCurrent">=@NO-BATCH_+</span>
-        <input id="batchInput" class="batch-input" type="text" maxlength="64" placeholder="New batch">
+        <input id="batchInput" class="batch-input" type="text" maxlength="32" placeholder="New batch">
         <button id="batchSetBtn" class="btn batch-set-btn" type="button">Set</button>
       </div>
+      <div id="batchMsg" class="batch-msg" hidden></div>
     </div>
     <div class="panel">
       <div class="footer-row">
@@ -143,6 +147,7 @@ const els = {
   batchCurrent: document.getElementById('batchCurrent'),
   batchInput: document.getElementById('batchInput'),
   batchSetBtn: document.getElementById('batchSetBtn'),
+  batchMsg: document.getElementById('batchMsg'),
   recipeWrap: document.querySelector('.recipe-wrap'),
   recipeToggle: document.getElementById('recipeToggle'),
   recipeMenu: document.getElementById('recipeMenu'),
@@ -183,9 +188,9 @@ async function doTrigger(){
   }
 }
 
-async function switchRecipe(name){
-  const recipe = String(name || '').trim();
-  if (!recipe || recipeSwitchInFlight) return;
+async function switchRecipe(slot){
+  const slotVal = Number(slot);
+  if (!Number.isInteger(slotVal) || slotVal <= 0 || recipeSwitchInFlight) return;
   recipeSwitchInFlight = true;
   let switched = false;
   closeRecipeMenu();
@@ -196,7 +201,7 @@ async function switchRecipe(name){
       {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({name: recipe}),
+        body: JSON.stringify({slot: slotVal}),
       },
       RECIPE_SWITCH_TIMEOUT_MS,
     );
@@ -244,6 +249,7 @@ function toggleRecipeMenu(){
 function renderBatch(batchState){
   if (!batchState || typeof batchState !== 'object'){
     els.batchPanel.hidden = true;
+    els.batchMsg.hidden = true;
     return;
   }
   els.batchPanel.hidden = false;
@@ -253,6 +259,19 @@ function renderBatch(batchState){
   els.batchSetBtn.disabled = batchSwitchInFlight || !hasInput;
 }
 
+function showBatchMessage(message, isError){
+  const text = String(message || '').trim();
+  if (!text){
+    els.batchMsg.hidden = true;
+    els.batchMsg.innerText = '';
+    els.batchMsg.className = 'batch-msg';
+    return;
+  }
+  els.batchMsg.hidden = false;
+  els.batchMsg.className = isError ? 'batch-msg err' : 'batch-msg success';
+  els.batchMsg.innerText = text;
+}
+
 async function setBatch(){
   const name = String(els.batchInput.value || '').trim();
   if (!name || batchSwitchInFlight){
@@ -260,6 +279,7 @@ async function setBatch(){
   }
   batchSwitchInFlight = true;
   els.batchSetBtn.disabled = true;
+  showBatchMessage('', false);
   try{
     const r = await fetchWithTimeout(
       '/batch/select',
@@ -277,31 +297,34 @@ async function setBatch(){
       throw new Error(msg);
     }
     els.batchInput.value = '';
+    showBatchMessage(payload.message || 'batch set', false);
   } catch(e){
     console.error(e);
+    showBatchMessage((e && e.message) ? e.message : 'batch set failed', true);
   } finally {
     batchSwitchInFlight = false;
     await refresh();
   }
 }
 
-function normalizeRecipeOptions(rawOptions){
-  return (Array.isArray(rawOptions) ? rawOptions : []).map(function(item){
+function normalizeRecipeSlots(rawSlots){
+  return (Array.isArray(rawSlots) ? rawSlots : []).map(function(item){
     return {
+      slot: Number((item || {}).slot || 0),
       name: String((item || {}).name || ''),
       valid: Boolean((item || {}).valid),
       error: String((item || {}).error || ''),
     };
   }).filter(function(item){
-    return Boolean(item.name);
+    return Number.isInteger(item.slot) && item.slot > 0 && Boolean(item.name);
   });
 }
 
-function buildRecipeItem(item, active, switching){
+function buildRecipeItem(item, currentSlot, switching){
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'recipe-item';
-  if (item.name === active){
+  if (item.slot === currentSlot){
     btn.classList.add('current');
   }
   if (!item.valid){
@@ -316,7 +339,7 @@ function buildRecipeItem(item, active, switching){
   nameEl.innerText = item.name;
   btn.appendChild(nameEl);
 
-  if (item.name === active){
+  if (item.slot === currentSlot){
     const badge = document.createElement('span');
     badge.className = 'badge';
     badge.innerText = 'Current';
@@ -331,33 +354,35 @@ function buildRecipeItem(item, active, switching){
   btn.addEventListener('click', function(ev){
     ev.stopPropagation();
     closeRecipeMenu();
-    void switchRecipe(item.name);
+    void switchRecipe(item.slot);
   });
   return btn;
 }
 
 function renderRecipes(recipeState){
   const state = recipeState || {};
-  const options = normalizeRecipeOptions(state.options);
-  const active = String(state.active || '');
+  const slots = normalizeRecipeSlots(state.slots);
+  const currentSlot = Number(state.current_slot || 0);
   const switching = Boolean(state.switching) || recipeSwitchInFlight;
+  const totalSlots = Number(state.total_slots || 0);
   const menu = els.recipeMenu;
   const toggle = els.recipeToggle;
 
   menu.innerHTML = '';
-  if (!options.length){
+  if (!slots.length || totalSlots <= 0){
     toggle.innerText = 'N/A';
     toggle.disabled = true;
     closeRecipeMenu();
     return;
   }
 
-  options.forEach(function(item){
-    menu.appendChild(buildRecipeItem(item, active, switching));
+  slots.forEach(function(item){
+    menu.appendChild(buildRecipeItem(item, currentSlot, switching));
   });
 
-  if (active && options.some(function(item){ return item.name === active; })){
-    toggle.innerText = active;
+  const current = slots.find(function(item){ return item.slot === currentSlot; });
+  if (current){
+    toggle.innerText = current.name;
   } else {
     toggle.innerText = '--';
   }
@@ -569,6 +594,7 @@ els.recipeToggle.addEventListener('click', function(ev){
   toggleRecipeMenu();
 });
 els.batchInput.addEventListener('input', function(){
+  showBatchMessage('', false);
   renderBatch({current: els.batchCurrent.innerText});
 });
 els.batchInput.addEventListener('keydown', function(ev){

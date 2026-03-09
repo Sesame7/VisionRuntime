@@ -23,6 +23,18 @@ from utils.modbus.pymodbus_compat import (
 
 L = logging.getLogger("vision_runtime.modbus.io")
 
+IR_RESULT_REG_COUNT = 10
+IR_COUNTER_REG_BASE = 10
+IR_RECIPE_ACK_SEQ_REG = 14
+IR_RECIPE_ACK_STATUS_REG = 15
+IR_REG_COUNT = 16
+HR_REG_COUNT = 8
+
+RECIPE_ACK_IDLE = 0
+RECIPE_ACK_RUNNING = 1
+RECIPE_ACK_OK = 2
+RECIPE_ACK_ERR = 3
+
 
 def _require_values(
     values: Sequence[int] | Sequence[bool] | object, count: int, label: str
@@ -37,6 +49,13 @@ def _require_values(
     return vals
 
 
+def _to_u16(value: int) -> int:
+    iv = int(value)
+    if iv < 0:
+        return 0
+    return 0xFFFF if iv > 0xFFFF else iv
+
+
 class ModbusIO:
     def __init__(
         self,
@@ -45,6 +64,7 @@ class ModbusIO:
         coil_offset: int,
         di_offset: int,
         ir_offset: int,
+        hr_offset: int,
         heartbeat_ms: int,
         *,
         loop_runner: LoopRunner,
@@ -54,6 +74,7 @@ class ModbusIO:
         self.coil_offset = max(int(coil_offset), 0)
         self.di_offset = max(int(di_offset), 0)
         self.ir_offset = max(int(ir_offset), 0)
+        self.hr_offset = max(int(hr_offset), 0)
         self.heartbeat_ms = max(int(heartbeat_ms), 100)
         self._lifecycle_lock = threading.Lock()
         self._data_lock = threading.Lock()
@@ -72,12 +93,14 @@ class ModbusIO:
         coil_base = self.coil_offset + 1
         di_base = self.di_offset + 1
         ir_base = self.ir_offset + 1
+        hr_base = self.hr_offset + 1
 
         self._coil_block = ModbusSequentialDataBlock(coil_base, [0] * 8)
         self._di_block = ModbusSequentialDataBlock(di_base, [0] * 8)
-        self._ir_block = ModbusSequentialDataBlock(ir_base, [0] * 10)
+        self._ir_block = ModbusSequentialDataBlock(ir_base, [0] * IR_REG_COUNT)
+        self._hr_block = ModbusSequentialDataBlock(hr_base, [0] * HR_REG_COUNT)
         self._device_ctx = ModbusDeviceContext(
-            di=self._di_block, co=self._coil_block, ir=self._ir_block, hr=None
+            di=self._di_block, co=self._coil_block, ir=self._ir_block, hr=self._hr_block
         )
         self._context = build_modbus_server_context(self._device_ctx)
 
@@ -146,6 +169,20 @@ class ModbusIO:
             )
             return _require_values(values, count, "coils")
 
+    def read_holding_registers(self, offset: int, count: int) -> list[int]:
+        with self._data_lock:
+            values = self._device_ctx.getValues(
+                3, self.hr_offset + int(offset), int(count)
+            )
+            return _require_values(values, count, "holding_registers")
+
+    def read_input_registers(self, offset: int, count: int) -> list[int]:
+        with self._data_lock:
+            values = self._device_ctx.getValues(
+                4, self.ir_offset + int(offset), int(count)
+            )
+            return _require_values(values, count, "input_registers")
+
     def toggle_di(self, idx: int):
         with self._data_lock:
             self._toggle_di_locked(idx)
@@ -160,18 +197,33 @@ class ModbusIO:
         ok: int,
         ng: int,
         err: int,
+        total_count: int = 0,
+        ok_count: int = 0,
+        ng_count: int = 0,
+        err_count: int = 0,
     ):
         with self._data_lock:
             self._write_result_regs_locked(
                 trig_time, seq, result_code, error_code, cycle_ms
             )
+            self._write_counter_regs_locked(total_count, ok_count, ng_count, err_count)
             self._write_result_bits_locked(ok, ng, err)
             self._toggle_di_locked(2)  # ST_RESULT_TOGGLE
+
+    def write_recipe_ack_status(self, status: int):
+        with self._data_lock:
+            self._write_recipe_ack_locked(seq=None, status=status)
+
+    def write_recipe_ack(self, seq: int, status: int):
+        with self._data_lock:
+            self._write_recipe_ack_locked(seq=seq, status=status)
 
     def reset_outputs(self):
         with self._data_lock:
             self._set_values_locked(2, self.di_offset + 0, [0] * 6, "di_reset")
-            self._set_values_locked(4, self.ir_offset + 0, [0] * 10, "ir_reset")
+            self._set_values_locked(
+                4, self.ir_offset + 0, [0] * IR_REG_COUNT, "ir_reset"
+            )
 
     async def _serve(self):
         server = ModbusTcpServer(self._context, address=(self.host, self.port))
@@ -235,5 +287,37 @@ class ModbusIO:
         ]
         self._set_values_locked(4, self.ir_offset, values, "ir_result")
 
+    def _write_counter_regs_locked(
+        self, total_count: int, ok_count: int, ng_count: int, err_count: int
+    ):
+        values = [
+            _to_u16(total_count),
+            _to_u16(ok_count),
+            _to_u16(ng_count),
+            _to_u16(err_count),
+        ]
+        self._set_values_locked(
+            4,
+            self.ir_offset + IR_COUNTER_REG_BASE,
+            values,
+            "ir_counters",
+        )
 
-__all__ = ["ModbusIO"]
+    def _write_recipe_ack_locked(self, seq: int | None, status: int):
+        values = []
+        start_addr = self.ir_offset + IR_RECIPE_ACK_SEQ_REG
+        if seq is None:
+            start_addr = self.ir_offset + IR_RECIPE_ACK_STATUS_REG
+        else:
+            values.append(_to_u16(seq))
+        values.append(_to_u16(status))
+        self._set_values_locked(4, start_addr, values, "ir_recipe_ack")
+
+
+__all__ = [
+    "ModbusIO",
+    "RECIPE_ACK_IDLE",
+    "RECIPE_ACK_RUNNING",
+    "RECIPE_ACK_OK",
+    "RECIPE_ACK_ERR",
+]

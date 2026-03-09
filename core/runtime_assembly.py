@@ -32,6 +32,7 @@ def build_runtime_config_from_loaded_config(cfg) -> RuntimeBuildConfig:
         coil_offset=cfg.comm.modbus.coil_offset,
         di_offset=cfg.comm.modbus.di_offset,
         ir_offset=cfg.comm.modbus.ir_offset,
+        hr_offset=cfg.comm.modbus.hr_offset,
         modbus_heartbeat_ms=cfg.comm.modbus.heartbeat_ms,
         write_csv=cfg.output.write_csv,
         detect_timeout_ms=cfg.detect.timeout_ms,
@@ -185,6 +186,7 @@ def _wire_output_channels(
             coil_offset=cfg.coil_offset,
             di_offset=cfg.di_offset,
             ir_offset=cfg.ir_offset,
+            hr_offset=cfg.hr_offset,
             heartbeat_ms=cfg.modbus_heartbeat_ms,
             loop_runner=loop_runner,
         )
@@ -194,7 +196,7 @@ def _wire_output_channels(
     if modbus_output_enabled and modbus_io:
         from output.modbus import ModbusOutput
 
-        output_mgr.add_channel(ModbusOutput(modbus_io))
+        output_mgr.add_channel(ModbusOutput(modbus_io, stats_provider=output_mgr.stats))
 
     return modbus_io
 

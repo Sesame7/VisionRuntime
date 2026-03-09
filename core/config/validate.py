@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from output.overlay_archive import validate_batch_name
+
 from .schema import ConfigError, LoadedConfig
 
 
@@ -50,6 +52,7 @@ def validate_config(cfg: LoadedConfig) -> None:
     _require_int("comm.modbus.coil_offset", cfg.comm.modbus.coil_offset, min_v=0)
     _require_int("comm.modbus.di_offset", cfg.comm.modbus.di_offset, min_v=0)
     _require_int("comm.modbus.ir_offset", cfg.comm.modbus.ir_offset, min_v=0)
+    _require_int("comm.modbus.hr_offset", cfg.comm.modbus.hr_offset, min_v=0)
     _require_int("comm.modbus.heartbeat_ms", cfg.comm.modbus.heartbeat_ms, min_v=1)
 
     # detect
@@ -63,7 +66,7 @@ def validate_config(cfg: LoadedConfig) -> None:
     _require_non_empty_str(
         "output.overlay_archive.base_dir", cfg.output.overlay_archive.base_dir
     )
-    _require_non_empty_str(
+    _require_batch_name(
         "output.overlay_archive.default_batch_id",
         cfg.output.overlay_archive.default_batch_id,
     )
@@ -78,7 +81,10 @@ def validate_config(cfg: LoadedConfig) -> None:
 def _require_int(
     name: str, value: Any, *, min_v: int | None = None, max_v: int | None = None
 ) -> int:
-    iv = int(value)
+    try:
+        iv = int(value)
+    except Exception as exc:
+        raise ConfigError(f"{name} must be an integer") from exc
     if min_v is not None and iv < min_v:
         op = ">=" if min_v != 1 else ">"
         threshold = min_v if min_v != 1 else 0
@@ -91,7 +97,10 @@ def _require_int(
 def _require_float(
     name: str, value: Any, *, min_v: float | None = None, max_v: float | None = None
 ) -> float:
-    fv = float(value)
+    try:
+        fv = float(value)
+    except Exception as exc:
+        raise ConfigError(f"{name} must be a number") from exc
     if min_v is not None and fv < min_v:
         raise ConfigError(f"{name} must be >= {min_v:g}")
     if max_v is not None and fv > max_v:
@@ -117,6 +126,14 @@ def _require_non_empty_str(name: str, value: Any) -> str:
     if not s:
         raise ConfigError(f"{name} must be a non-empty string")
     return s
+
+
+def _require_batch_name(name: str, value: Any) -> str:
+    s = _require_non_empty_str(name, value)
+    try:
+        return validate_batch_name(s)
+    except ValueError as exc:
+        raise ConfigError(f"{name} is invalid: {exc}") from exc
 
 
 __all__ = ["validate_config"]
