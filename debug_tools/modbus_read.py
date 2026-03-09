@@ -1,6 +1,6 @@
 # -- coding: utf-8 --
 
-"""Single-run Modbus TCP reader for v2.2 DI/IR layout (PDU 0-based)."""
+"""Single-run Modbus TCP reader for v3 DI/IR/HR layout (PDU 0-based)."""
 
 import argparse
 import sys
@@ -9,14 +9,14 @@ from pymodbus.client import ModbusTcpClient
 
 
 def main():
-    p = argparse.ArgumentParser(description="Read Modbus v2.2 DI/IR once and exit")
+    p = argparse.ArgumentParser(description="Read Modbus v3 DI/IR/HR once and exit")
     p.add_argument("--host", default="127.0.0.1", help="Modbus TCP host")
     p.add_argument("--port", type=int, default=1502, help="Modbus TCP port")
     p.add_argument("--device-id", type=int, default=1, help="Device ID")
     p.add_argument(
         "--coil-offset", type=int, default=800, help="Coil start offset (PDU 0-based)"
     )
-    p.add_argument("--coil-count", type=int, default=2, help="Number of coils to read")
+    p.add_argument("--coil-count", type=int, default=1, help="Number of coils to read")
     p.add_argument(
         "--di-offset",
         type=int,
@@ -35,6 +35,15 @@ def main():
     p.add_argument(
         "--ir-count", type=int, default=16, help="Number of input registers to read"
     )
+    p.add_argument(
+        "--hr-offset",
+        type=int,
+        default=50,
+        help="Holding register start offset (PDU 0-based)",
+    )
+    p.add_argument(
+        "--hr-count", type=int, default=2, help="Number of holding registers to read"
+    )
     args = p.parse_args()
 
     print(f"Connecting TCP {args.host}:{args.port}")
@@ -51,6 +60,9 @@ def main():
         )
         ir_res = client.read_input_registers(
             address=args.ir_offset, count=args.ir_count, device_id=args.device_id
+        )
+        hr_res = client.read_holding_registers(
+            address=args.hr_offset, count=args.hr_count, device_id=args.device_id
         )
 
         if coil_res.isError():
@@ -70,6 +82,13 @@ def main():
         else:
             print(
                 f"IRegister @{args.ir_offset} count={args.ir_count}: {list(ir_res.registers)}"
+            )
+
+        if hr_res.isError():
+            print(f"HRegister @{args.hr_offset} error: {hr_res}")
+        else:
+            print(
+                f"HRegister @{args.hr_offset} count={args.hr_count}: {list(hr_res.registers)}"
             )
 
 

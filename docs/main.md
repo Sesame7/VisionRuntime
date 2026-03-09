@@ -10,8 +10,8 @@
 
 ```text
 .
-├─config/            # main_*.yaml (single-load), detect_*.yaml, example_main_*.yaml, demo detect examples
-├─core/              # runtime.py, worker.py, contracts.py, config.py
+├─config/            # main_*.yaml (single-load), <detect_impl>/*.yaml recipes, example_main_*.yaml, tests/
+├─core/              # runtime.py, worker.py, contracts.py, runtime_assembly.py, config/
 ├─camera/            # base.py + adapters
 ├─detect/            # base.py + detection plugins
 ├─output/            # manager.py, channel implementations, web assets
@@ -26,14 +26,14 @@
 
 ## 3. Configuration and Entrypoint
 
-- Configurations are centralized under `config/`. Recommended main config naming is `main_<PROJECT>_<SITE>.yaml`; runtime loader behavior is “exactly one `main_*.yaml` in the selected config directory”. Detection parameters are carried by `detect_*.yaml`. Field meanings and validations are described in `config.md`.
+- Configurations are centralized under `config/`. Recommended main config naming is `main_<PROJECT>_<SITE>.yaml`; runtime loader behavior is “exactly one `main_*.yaml` in the selected config directory”. Detection recipes are resolved by `detect.recipe_dir` + `detect.default_recipe`. Field meanings and validations are described in `config.md`.
 - The entrypoint is responsible for: load config → initialize runtime components (`build_runtime`) → create enabled trigger sources → start runtime (workers/output/triggers) → enter the blocking runtime loop (which also emits heartbeat ticks). Global data contracts are defined by `core/contracts`.
 - Communication endpoints (host/port/offsets) are configured under the `comm` section and referenced by trigger/output enablement.
 - The top-level `imports` list is an optional preload hook for plugin modules / side-effect registrations (mainly custom extensions). Built-in camera/detect/trigger modules can be lazily imported by factory name, and output channels are wired directly in `build_runtime(...)`. Each item is a Python import path. An empty list is allowed; import failure causes startup failure.
 
 ## 4. Data and Logs
 
-- Image dumping: when `camera.save_images` is enabled, images are written under `<runtime.save_dir>/images` (extension controlled by camera config). Only the Camera acquisition path may optionally save raw images; other modules do not write image files.
+- Image dumping: when `camera.save_images` is enabled and the selected adapter supports persistence, images are written under `<runtime.save_dir>/images` (extension controlled by camera config). In current code, saving is implemented by `opt/hik`; `mock/raspi` do not persist frames. Only the Camera acquisition path may optionally save raw images; other modules do not write image files.
 - Log/result files: production runtime prints to terminal only; during debugging or production result archiving, Output may write result summaries (for example `<runtime.save_dir>/images/YYYY-MM-DD/records.csv`) and optional channel-specific logs. Camera SDK auto-generated directories such as `DrvLog`/`System`/`SystemLog` are out of scope of this design.
 
 ## 5. Module Responsibility Anchors
@@ -54,9 +54,8 @@
 
 ## 7. main Module Design Key Points
 
-- Responsibilities: parse required CLI/environment parameters (e.g., optional `--config-dir`, `--log-level`), locate the unique `main_*.yaml`, call Loader to produce the config object, and optionally preload modules declared in `imports`.
+- Responsibilities: parse CLI parameters (currently `--config-dir`, `--verbose`, `--log-level`), locate the unique `main_*.yaml`, call Loader to produce the config object (including optional `imports` preloading), and bootstrap runtime components.
 - Startup sequence (current implementation): load config/imports → build detector/camera/runtime → create enabled trigger sources → `runtime.start(...)` (Camera/Detect Workers → Output channels → triggers) → enter blocking main loop (`runtime.run(...)`, which also emits heartbeat ticks).
-- Shutdown sequence: receive signal/exception → request each module to stop → wait for Workers/channels to close → call `shutdown_loop()` to close the async loop → exit process; stop/join timeouts can reuse runtime defaults.
+- Shutdown sequence (current implementation): `runtime.run(...)` always calls `runtime.stop()` in `finally`; on `KeyboardInterrupt`, `main` additionally calls `runtime.stop()` in a best-effort path and logs a stop message.
 - Logging: follow global `log_level`; production prints to terminal only; during debugging, Output may optionally dump file logs (`logs/`).
-- Exception handling: if config/import/startup fails at any step, exit immediately and print a clear error; uncaught runtime exceptions are caught by main, then trigger an orderly shutdown.
-
+- Exception handling: config/import/startup failures are not explicitly caught in `main` (the process exits with traceback). During runtime, worker/trigger/output failures are surfaced by `runtime.run(...)`; `main` currently only catches `KeyboardInterrupt`.

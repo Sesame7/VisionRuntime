@@ -133,13 +133,14 @@ For built-in modules, `imports` is usually not required; keep it for custom/exte
 
 ## Outputs
 
-- Images: `<runtime.save_dir>/images` when camera image saving is enabled (typically `camera.common.save_images: true`)
+- Images: `<runtime.save_dir>/images` when camera image saving is enabled and supported by the selected adapter (currently `opt/hik`; `mock/raspi` do not persist frames in the current implementation)
 - CSV: `<runtime.save_dir>/images/YYYY-MM-DD/records.csv` when `output.write_csv` is true
 
 ## Optional Tools
 
 - Backup Streamlit HMI: `debug_tools/streamlit_hmi.py`
-- Optional deps: `pip install -r requirements-tools-streamlit.txt`
+- Optional deps (manual): `pip install streamlit streamlit-autorefresh requests`
+- Note: `debug_tools/streamlit_hmi.py` is a legacy fallback client and supports current `/status` payload (`triggered_at_ms`, with legacy-field fallback).
 
 ## Contributing
 

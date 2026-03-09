@@ -23,9 +23,9 @@
 
 ## 4. Loader Responsibilities and Flow
 
-1) Construct the default config object (dataclass), apply known fields, and warn on unknown fields to prevent typos being silently ignored.  
+1) Construct the default config object (dataclass), apply known fields, and fail fast on unknown fields (`ConfigError`) to prevent typos being silently ignored.  
 2) Scan and load the main config `main_*.yaml`, bind blocks into Runtime/Camera/Trigger/Output/Detect metadata, etc.; on validation failure, provide “file + field path”.  
-2.5) Optionally import extra plugin modules according to the `imports` list from the main config (string Python import paths). Import failure is a startup error (must include filename + failing import path). An empty/missing list is allowed because built-in camera/trigger/detect modules can be lazily imported when instantiated, and output channels are assembled directly in runtime wiring.  
+2.5) Optionally import extra plugin modules according to the `imports` list from the main config (string Python import paths). Import failure is a startup error (error text follows the underlying Python import exception). An empty/missing list is allowed because built-in camera/trigger/detect modules can be lazily imported when instantiated, and output channels are assembled directly in runtime wiring.  
 3) Read `detect.recipe_dir` + `detect.default_recipe` from main config; validate directory/default recipe metadata (without parsing all recipe params in Loader).  
 4) Pass the loaded config object to runtime assembly; recipe params are parsed/validated by recipe manager and detector construction paths.  
 5) Detection params are not validated here; detectors should validate their own parameters if needed.

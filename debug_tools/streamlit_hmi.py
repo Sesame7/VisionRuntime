@@ -1,6 +1,7 @@
 import time
 from io import BytesIO
 from pathlib import Path
+from datetime import datetime, timezone
 
 import requests
 import streamlit as st
@@ -155,15 +156,45 @@ def heartbeat_status(status_data: dict | None) -> str:
     return "ok" if alive else "ng"
 
 
-def format_trigger_dt(value: str) -> tuple[str, str]:
-    return value[:10], value[11:24]
+def _record_trigger_dt_utc(rec: dict) -> datetime | None:
+    ms = rec.get("triggered_at_ms")
+    if isinstance(ms, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc)
+        except Exception:
+            pass
+
+    raw = str(rec.get("triggered_at", "") or "").strip()
+    if not raw:
+        return None
+    try:
+        iso = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def format_trigger_dt(rec: dict) -> tuple[str, str]:
+    dt = _record_trigger_dt_utc(rec)
+    if dt is None:
+        return "", ""
+    date_text = dt.strftime("%Y-%m-%d")
+    time_text = dt.strftime("%H:%M:%S.%f")[:12] + "Z"
+    return date_text, time_text
+
+
+def format_trigger_line(rec: dict) -> str:
+    date_text, time_text = format_trigger_dt(rec)
+    return f"{date_text} {time_text}".strip()
 
 
 def build_table_html(records: list[dict]) -> str:
     rows_html = []
     for rec in records:
-        trig = rec.get("triggered_at", "")
-        date, time_str = format_trigger_dt(trig)
+        date, time_str = format_trigger_dt(rec)
         res = str(rec.get("result", "")).upper()
         color = "#2ecc71" if res == "OK" else ("#ff4d4d" if res == "NG" else "#ffb020")
         ms_val = f"{float(rec.get('duration_ms', 0.0)):.1f}"
@@ -258,10 +289,10 @@ with right:
             latest = get_latest_record(status_data)
             if latest:
                 latest_id = str(latest.get("trigger_seq", 0)).rjust(5, "_")
-                latest_dt = latest.get("triggered_at", "")
+                latest_dt = format_trigger_line(latest)
                 latest_line = (
                     "<div style='display:flex;align-items:center;min-height:38px;'>"
-                    f"<span style='color:{title_color};line-height:1;'>{latest_id} {latest_dt.replace('T', ' ')}</span>"
+                    f"<span style='color:{title_color};line-height:1;'>{latest_id} {latest_dt}</span>"
                     "</div>"
                 )
                 st.markdown(latest_line, unsafe_allow_html=True)

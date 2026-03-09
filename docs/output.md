@@ -17,9 +17,11 @@
 
 ## 3. Channel Semantics (Summary)
 
-- HMI: HTTP query only (no push). Endpoints `/status`, `/preview/latest`, and `/trigger` (manual trigger). Data sources are the runtime result read API (`AppContext.results`, implemented by `OutputManager`). Static resource `web/index.html`.
+- HMI: HTTP query only (no push). Endpoints `/status`, `/preview/latest`, `/trigger` (manual trigger), `/recipe/select`, and `/batch/select`. Data sources are the runtime result read API (`AppContext.results`, implemented by `OutputManager`). Static resource `web/index.html`.
   - `/status` supports incremental pull with `since_seq` query param and returns lightweight records (`trigger_seq/result/result_code/duration_ms/triggered_at_ms`) plus `latest_seq/full_snapshot` for client resync.
-  - Web layout: left side is the overlay preview occupying most of the area; right side shows runtime time, manual trigger, counters (OK/NG/ERROR/TOTAL, where NG does not include ERROR), history table, and a runtime online indicator.
+  - `/recipe/select` accepts a slot command and triggers runtime recipe switching.
+  - `/batch/select` updates the active batch id used by overlay archive output.
+  - Web layout: left side is the overlay preview occupying most of the area; right side shows runtime time, manual trigger, counters (OK/NG/ERROR/TOTAL, where NG does not include ERROR), history table, batch controls, recipe selector, and a runtime online indicator.
   - Display logic: when there is no recent result, summary areas show an explicit empty state (e.g., “Idle”). When `result=ERROR` or `TIMEOUT`, `/preview/latest` returns a red SVG placeholder for on-site visibility.
   - Empty-state API: `/preview/latest` returns 404 when no preview exists.
 - Modbus: `ModbusOutput` maps OutputRecord to result codes/bits, and `ModbusIO` performs register writes only. It updates Discrete Inputs (DI / function-code-2 area: OK/NG/ERR + toggles) and Input Registers (IR / function-code-4 area: timestamps/seq/codes). For PLC it only distinguishes OK/NG; Timeout/Error also map to NG (business NG and ERROR are unified as an NG signal; naming still uses NG/ERROR prefixes for upper-layer display). When emitting a result, update IR → DI bits → toggle result.
@@ -38,5 +40,5 @@
 ## 6. Test Points
 
 - OutputManager: after multiple `publish` calls, last/history/preview remain consistent; an exception in one channel does not affect other channels.
-- HMI: API data are consistent; when there is no preview, `/preview/latest` returns 404.
+- HMI: API data are consistent; when there is no preview, `/preview/latest` returns 404; recipe/batch APIs return consistent status and error messages.
 - Modbus/TCP/GPIO/CSV: each channel should follow its output semantics and avoid blocking the detect thread; after channel shutdown, no dangling tasks should remain.
