@@ -14,7 +14,7 @@
 - `debug_tools/modbus_sim_server.py`: Modbus TCP simulator for the v3 point table.
 - `debug_tools/tcp_listen.py`: TCP listener to inspect incoming trigger payloads.
 - `debug_tools/tcp_send_once.py`: send one TCP trigger payload.
-- `debug_tools/streamlit_hmi.py`: backup Streamlit HMI client (polls the built-in HTTP HMI API; legacy fallback script).
+- `debug_tools/streamlit_hmi.py`: backup Streamlit HMI client (polls the built-in HTTP HMI API).
 
 ## 3. modbus_read.py
 
@@ -66,4 +66,4 @@
 - Do not modify production data: do not write into `data/`, `logs/`, or other production directories. If writing results is needed, require an explicit user-specified path.
 - Dependencies: prefer the same dependency versions as the main project; if extra dependencies are required, document them in README/comments.
 - `debug_tools/streamlit_hmi.py` optional deps are installed manually: `pip install streamlit streamlit-autorefresh requests`.
-- `debug_tools/streamlit_hmi.py` reads `/status` timing fields with `triggered_at_ms` priority and keeps legacy `triggered_at` fallback.
+- `debug_tools/streamlit_hmi.py` reads `/status` timing fields from `triggered_at_ms`.

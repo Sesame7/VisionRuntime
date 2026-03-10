@@ -18,6 +18,7 @@ from .schema import (
     ConfigError,
     DetectConfigBlock,
     LoadedConfig,
+    LoadedPaths,
     OutputConfigBlock,
     OutputHmiConfigBlock,
     OutputModbusConfigBlock,
@@ -76,13 +77,13 @@ def load_config(config_dir: str = "config") -> LoadedConfig:
         comm=comm,
         detect=detect,
         output=output,
-        paths={
-            "main": main_path,
-            "detect": detect_path,
-            "recipe_dir": recipe_dir,
-            "default_recipe": detect.default_recipe,
-            "recipe_files": ",".join(recipe_files),
-        },
+        paths=LoadedPaths(
+            main=main_path,
+            detect=detect_path,
+            recipe_dir=recipe_dir,
+            default_recipe=detect.default_recipe,
+            recipe_files=recipe_files,
+        ),
     )
 
 

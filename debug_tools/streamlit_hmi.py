@@ -158,21 +158,10 @@ def heartbeat_status(status_data: dict | None) -> str:
 
 def _record_trigger_dt_utc(rec: dict) -> datetime | None:
     ms = rec.get("triggered_at_ms")
-    if isinstance(ms, (int, float)):
-        try:
-            return datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc)
-        except Exception:
-            pass
-
-    raw = str(rec.get("triggered_at", "") or "").strip()
-    if not raw:
+    if not isinstance(ms, (int, float)):
         return None
     try:
-        iso = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
-        dt = datetime.fromisoformat(iso)
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
+        return datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc)
     except Exception:
         return None
 

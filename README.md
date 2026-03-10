@@ -140,7 +140,7 @@ For built-in modules, `imports` is usually not required; keep it for custom/exte
 
 - Backup Streamlit HMI: `debug_tools/streamlit_hmi.py`
 - Optional deps (manual): `pip install streamlit streamlit-autorefresh requests`
-- Note: `debug_tools/streamlit_hmi.py` is a legacy fallback client and supports current `/status` payload (`triggered_at_ms`, with legacy-field fallback).
+- Note: `debug_tools/streamlit_hmi.py` reads `/status` timestamps from `triggered_at_ms`.
 
 ## Contributing
 

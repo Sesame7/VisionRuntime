@@ -149,19 +149,6 @@ class RecipeManager:
                     return idx
         raise ValueError(f"recipe not found: {name}")
 
-    def list_recipes(self) -> list[dict[str, Any]]:
-        """Backward-compatible list shape for legacy call paths."""
-        with self._lock:
-            entries = list(self._entries.values())
-        return [
-            {
-                "name": e.name,
-                "valid": bool(e.valid),
-                "error": str(e.error or ""),
-            }
-            for e in entries
-        ]
-
     def build_detector_for(self, recipe_name: str):
         name = str(recipe_name)
         with self._lock:

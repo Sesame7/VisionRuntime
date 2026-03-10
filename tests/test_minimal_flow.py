@@ -9,11 +9,10 @@ from camera import build_camera_config, create_camera
 from core.config import load_config
 from core.runtime import RuntimeBuildConfig, build_runtime
 from core.worker import AcqTask, DetectQueueManager
-from detect import create_detector_from_loaded_config
+from detect import RecipeManager
 from trigger import TriggerConfig
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-DETECT_CONFIG_PATH = os.path.join(REPO_ROOT, "config", "overexposure", "default.yaml")
 TEST_CONFIG_DIR = os.path.join(REPO_ROOT, "config", "tests")
 TEST_IMAGE_DIR = os.path.join(REPO_ROOT, "data", "test")
 
@@ -28,11 +27,7 @@ def _wait_for_records(output_mgr, count: int, timeout_s: float = 2.0):
     raise AssertionError(f"timeout waiting for {count} records")
 
 
-def _assert_test_assets_present():
-    if not os.path.exists(DETECT_CONFIG_PATH):
-        raise AssertionError(f"missing detect config: {DETECT_CONFIG_PATH}")
-    if not os.path.isdir(TEST_CONFIG_DIR):
-        raise AssertionError(f"missing test config dir: {TEST_CONFIG_DIR}")
+def _assert_test_images_present():
     if not os.path.isfile(os.path.join(TEST_IMAGE_DIR, "ok.png")):
         raise AssertionError(f"missing ok image: {TEST_IMAGE_DIR}")
     if not os.path.isfile(os.path.join(TEST_IMAGE_DIR, "ng.png")):
@@ -55,13 +50,17 @@ def _build_test_runtime():
     cfg = load_config(TEST_CONFIG_DIR)
     cfg.runtime.save_dir = TEST_IMAGE_DIR
     cfg.trigger.debounce_ms = 0.0
-    cfg.camera.image_dir = TEST_IMAGE_DIR
     camera_cfg = build_camera_config(cfg.camera, save_dir=cfg.runtime.save_dir)
     camera = create_camera(cfg.camera.type, camera_cfg)
-    detector = create_detector_from_loaded_config(
-        cfg,
-        input_pixel_format=cfg.camera.capture_output_format,
+    recipe_manager = RecipeManager(
+        impl=cfg.detect.impl,
+        recipe_dir=cfg.paths.recipe_dir,
+        default_recipe=cfg.detect.default_recipe,
+        preview_enabled=bool(cfg.detect.preview_enabled),
+        preview_max_edge=int(cfg.detect.preview_max_edge),
+        input_pixel_format=camera.cfg.output_pixel_format,
     )
+    detector = recipe_manager.build_detector_for(recipe_manager.active_recipe())
     runtime = build_runtime(
         camera,
         config=RuntimeBuildConfig(
@@ -102,7 +101,7 @@ class TestMinimalFlow(unittest.TestCase):
         self.assertEqual(dropped_ids, [1])
 
     def test_trigger_mock_camera_overexposure(self):
-        _assert_test_assets_present()
+        _assert_test_images_present()
         runtime = _build_test_runtime()
         self.assertIsNotNone(runtime.app_context.batch_api)
         batch_status = runtime.app_context.batch_api.batch_status()  # type: ignore[union-attr]

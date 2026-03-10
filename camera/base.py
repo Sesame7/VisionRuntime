@@ -115,13 +115,9 @@ def create_camera(name: str, cfg: CameraConfig) -> BaseCamera:
 def create_camera_from_loaded_config(cfg) -> BaseCamera:
     image_root = os.path.join(cfg.runtime.save_dir, "images")
     if bool(cfg.camera.save_images):
-        ensure_dir(image_root)
+        os.makedirs(image_root, exist_ok=True)
     cam_cfg = build_camera_config(cfg.camera, save_dir=image_root)
     return create_camera(cfg.camera.type, cam_cfg)
-
-
-def ensure_dir(path: str):
-    os.makedirs(path, exist_ok=True)
 
 
 __all__ = [
@@ -132,5 +128,4 @@ __all__ = [
     "register_camera",
     "create_camera",
     "create_camera_from_loaded_config",
-    "ensure_dir",
 ]

@@ -3,7 +3,6 @@ import logging
 from typing import Callable, Dict, Protocol, Tuple
 
 import numpy as np
-import yaml
 from utils.registry import register_named, resolve_registered
 
 L = logging.getLogger("vision_runtime.detection")
@@ -46,28 +45,6 @@ def create_detector(
     return factory(params or {}, generate_overlay, **kwargs)
 
 
-def create_detector_from_loaded_config(
-    cfg,
-    *,
-    input_pixel_format: str | None = None,
-) -> Detector:
-    preview_enabled = bool(cfg.detect.preview_enabled)
-    preview_max_edge = int(cfg.detect.preview_max_edge)
-    pixel_format = (
-        input_pixel_format
-        if input_pixel_format is not None
-        else str(cfg.camera.capture_output_format)
-    )
-    params = _load_default_recipe_params(cfg)
-    return create_detector(
-        cfg.detect.impl,
-        params,
-        generate_overlay=preview_enabled,
-        input_pixel_format=pixel_format,
-        preview_max_edge=preview_max_edge,
-    )
-
-
 def _factory_accepts_kwarg(factory: Callable[..., Detector], name: str) -> bool:
     try:
         signature = inspect.signature(factory)
@@ -79,18 +56,8 @@ def _factory_accepts_kwarg(factory: Callable[..., Detector], name: str) -> bool:
     return name in signature.parameters
 
 
-def _load_default_recipe_params(cfg) -> dict:
-    path = str(cfg.paths["detect"]).strip()
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"Detector recipe must be a mapping: {path}")
-    return data
-
-
 __all__ = [
     "Detector",
     "register_detector",
     "create_detector",
-    "create_detector_from_loaded_config",
 ]

@@ -85,10 +85,6 @@ def validate_batch_name(batch_id: str) -> str:
     return candidate
 
 
-# Backward-compatible internal alias for legacy imports.
-_validate_batch_name = validate_batch_name
-
-
 class OverlayArchiveOutput:
     def __init__(
         self,

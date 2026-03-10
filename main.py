@@ -64,7 +64,7 @@ def build_app(cfg):
     camera = create_camera_from_loaded_config(cfg)
     recipe_manager = RecipeManager(
         impl=cfg.detect.impl,
-        recipe_dir=cfg.paths["recipe_dir"],
+        recipe_dir=cfg.paths.recipe_dir,
         default_recipe=cfg.detect.default_recipe,
         preview_enabled=bool(cfg.detect.preview_enabled),
         preview_max_edge=int(cfg.detect.preview_max_edge),
@@ -133,10 +133,10 @@ def _log_startup(cfg) -> None:
     )
     logging.info(
         "Config files: main=%s recipe_dir=%s default_recipe=%s recipe_path=%s",
-        cfg.paths.get("main"),
-        cfg.paths.get("recipe_dir"),
-        cfg.paths.get("default_recipe"),
-        cfg.paths.get("detect"),
+        cfg.paths.main,
+        cfg.paths.recipe_dir,
+        cfg.paths.default_recipe,
+        cfg.paths.detect,
     )
 
 

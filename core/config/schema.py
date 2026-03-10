@@ -1,7 +1,7 @@
 """Typed config schema blocks shared by loader/validator/runtime."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import List
 
 
 class ConfigError(Exception):
@@ -134,6 +134,15 @@ class OutputConfigBlock:
 
 
 @dataclass
+class LoadedPaths:
+    main: str = ""
+    detect: str = ""
+    recipe_dir: str = ""
+    default_recipe: str = ""
+    recipe_files: List[str] = field(default_factory=list)
+
+
+@dataclass
 class LoadedConfig:
     imports: List[str]
     runtime: RuntimeConfig
@@ -142,7 +151,7 @@ class LoadedConfig:
     comm: CommConfigBlock
     detect: DetectConfigBlock
     output: OutputConfigBlock
-    paths: Dict[str, str] = field(default_factory=dict)
+    paths: LoadedPaths = field(default_factory=LoadedPaths)
 
 
 __all__ = [
@@ -161,5 +170,6 @@ __all__ = [
     "OutputModbusConfigBlock",
     "OutputOverlayArchiveConfigBlock",
     "OutputConfigBlock",
+    "LoadedPaths",
     "LoadedConfig",
 ]

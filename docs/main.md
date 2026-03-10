@@ -11,7 +11,7 @@
 ```text
 .
 ├─config/            # main_*.yaml (single-load), <detect_impl>/*.yaml recipes, example_main_*.yaml, tests/
-├─core/              # runtime.py, worker.py, contracts.py, runtime_assembly.py, config/
+├─core/              # runtime.py, worker.py, contracts.py, config/
 ├─camera/            # base.py + adapters
 ├─detect/            # base.py + detection plugins
 ├─output/            # manager.py, channel implementations, web assets

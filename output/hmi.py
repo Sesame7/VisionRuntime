@@ -75,7 +75,6 @@ class _ApiServer:
             return {
                 "trigger_seq": int(rec.trigger_seq or 0),
                 "result": str(rec.result or ""),
-                "result_code": str(rec.result_code or ""),
                 "duration_ms": float(rec.duration_ms or 0.0),
                 "triggered_at_ms": _to_unix_ms(rec.triggered_at),
             }
