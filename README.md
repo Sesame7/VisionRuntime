@@ -1,13 +1,28 @@
 # VisionRuntime
 
-Config-driven industrial vision service for production lines, with web HMI, Modbus output, and pluggable camera/trigger/detector modules.
+Deployable, config-driven vision runtime for real-world production-line inspection.
 
-## Features
+VisionRuntime is an industrial vision service designed for production environments.  
+It focuses not only on running detection logic, but also on maintainability, pluggable integration, and deployment-oriented operation.
 
-- Pluggable camera drivers (mock, raspi, hik/opt when available)
-- Trigger inputs (TCP, Modbus, Web)
-- Outputs (Web HMI, Modbus, CSV)
-- Config-driven runtime via YAML
+## Overview
+
+This project provides a configurable runtime for factory inspection workflows, with:
+
+- pluggable camera, trigger, detector, and output modules
+- web HMI for live status and recent records
+- Modbus and CSV outputs for system integration
+- YAML-based runtime configuration and detector recipe loading
+
+It is intended for scenarios where inspection software needs to be integrated into a larger automation system rather than used as a standalone demo.
+
+## Highlights
+
+- **Config-first runtime** for maintainable inspection workflows
+- **Pluggable modules** for cameras, triggers, detectors, and outputs
+- **Web HMI + Modbus integration** for production-line environments
+- **YAML-based configuration** for runtime behavior and detector recipes
+- **Deployment-oriented structure** suitable for long-running service operation
 
 ## Architecture
 
@@ -61,38 +76,84 @@ flowchart LR
 
 ![Web HMI](docs/assets/web-hmi.png)
 
-Live status, last-N records, and the latest preview image. Served at `http://<comm.http.host>:<comm.http.port>` when `output.hmi.enabled` is true (defaults `0.0.0.0:8000`).
+The built-in Web HMI provides:
+
+- live runtime status
+- recent inspection records
+- the latest preview image
+
+It is served at:
+
+`http://<comm.http.host>:<comm.http.port>`
+
+when `output.hmi.enabled` is `true`  
+(default: `0.0.0.0:8000`).
 
 ## Quick Start
 
 ```bash
 python -m venv .venv
+
 # Windows PowerShell
 .venv\Scripts\Activate.ps1
+
 # Linux/macOS
 source .venv/bin/activate
 pip install -r requirements.txt
+
 python main.py --config-dir config
 ```
 
 ## Deployment
 
-See `docs/deploy.md` for a Linux/Ubuntu deployment guide and systemd unit example.
+For Linux/Ubuntu deployment and a `systemd` service example, see:
+
+- `docs/deploy.md`
 
 ## Configuration
 
-Main config must be exactly one file: `config/main_*.yaml` or `config/main_*.yml`. Detection recipes are loaded from `detect.recipe_dir`, with startup default `detect.default_recipe`.
+Runtime behavior is controlled by YAML configuration.
 
-Core sections:
+The main config must be exactly one file:
 
-- `runtime`: save_dir, max_runtime_s, detect_queue_capacity, log_level
-- `camera`: driver, exposure, image save options
-- `trigger`: debounce + TCP/Modbus settings and filters
-- `comm`: TCP/Modbus/HTTP ports
-- `detect`: detector implementation, recipe directory/default, switch guard, preview settings
-- `output`: HMI/Modbus/CSV switches (including `output.hmi.history_size`) and optional overlay archive (`output.overlay_archive`)
+- `config/main_*.yaml`
+- or `<config-dir>/main_*.yml`
 
-Camera config is split by implementation: use `camera.common` for shared fields and `camera.<type>` for adapter-specific fields (for example `camera.mock`, `camera.raspi`, `camera.opt`, `camera.hik`).
+Detection recipes are loaded from `detect.recipe_dir`, with startup default set by `detect.default_recipe`.
+
+### Core sections
+
+- `runtime`  
+  save directory, runtime limits, queue capacity, log level
+
+- `camera`  
+  driver selection, exposure, image save options
+
+- `trigger`  
+  debounce behavior, TCP/Modbus settings, and filters
+
+- `comm`  
+  TCP / Modbus / HTTP ports
+
+- `detect`  
+  detector implementation, recipe directory/default, switch guard, preview settings
+
+- `output`  
+  HMI / Modbus / CSV switches, including `output.hmi.history_size` and optional `output.overlay_archive`
+
+### Camera configuration pattern
+
+Camera configuration is split by implementation:
+
+- `camera.common` for shared fields
+- `camera.<type>` for adapter-specific fields
+
+Examples of adapter-specific sections include:
+
+- `camera.mock`
+- `camera.raspi`
+- `camera.opt`
+- `camera.hik`
 
 ### Raspberry Pi camera (Picamera2)
 
@@ -133,24 +194,56 @@ For built-in modules, `imports` is usually not required; keep it for custom/exte
 
 ## Outputs
 
-- Images: `<runtime.save_dir>/images` when camera image saving is enabled and supported by the selected adapter (currently `opt/hik`; `mock/raspi` do not persist frames in the current implementation)
-- CSV: `<runtime.save_dir>/images/YYYY-MM-DD/records.csv` when `output.write_csv` is true
+### Images
+
+Saved to:
+
+`<runtime.save_dir>/images`
+
+when image saving is enabled and supported by the selected adapter.
+
+Current behavior:
+
+- supported by `opt` / `hik`
+- not persisted by `mock` / `raspi` in the current implementation
+
+### CSV
+
+Saved to:
+
+`<runtime.save_dir>/images/YYYY-MM-DD/records.csv`
+
+when `output.write_csv` is `true`.
 
 ## Optional Tools
 
 - Backup Streamlit HMI: `debug_tools/streamlit_hmi.py`
-- Optional deps (manual): `pip install streamlit streamlit-autorefresh requests`
-- Note: `debug_tools/streamlit_hmi.py` reads `/status` timestamps from `triggered_at_ms`.
+- Optional manual dependencies:
 
-## Contributing
+```bash
+pip install streamlit streamlit-autorefresh requests
+```
 
-See `CONTRIBUTING.md` for how to report issues and submit PRs.
+Note:
+
+- `debug_tools/streamlit_hmi.py` reads `/status` timestamps from `triggered_at_ms`
 
 ## Tests
 
 - Minimal flow test config: `config/tests/main_test.yaml`
-- Test images: `data/test/ok.png`, `data/test/ng.png`
-- Run: `python -m unittest discover -s tests -v`
+- Test images:
+  - `data/test/ok.png`
+  - `data/test/ng.png`
+
+Run tests with:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## Contributing
+
+See `CONTRIBUTING.md` for issue reporting and pull request guidelines.
 
 ## License
 
